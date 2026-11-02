@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+external/
+checkpoint/
+results/
+data/*.pt
+data/*.npz
+!data/readout.npz
+!data/drive_neurons.npz
+node_modules/
+package-lock.json

@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant H as Host: world and body
+  participant Q as Qwen's 32 layers
+  participant F as The fly's 3 layers
+  H->>Q: report text: position, drops, perch, time fed
+  loop taste, proboscis, antennae, wings
+    H->>F: SAY token
+    F-->>Q: the fly's word, e.g. " sweet"
+  end
+  H->>Q: the question, ending at "):"
+  Q->>F: final state at "):" sets 7 drive registers
+  loop 200 steps of 0.1 ms
+    F->>F: spike tokens through the connectome, then TICK
+  end
+  F-->>H: motor rates every 1 ms (MOVE rows)
+  H->>H: the body moves, and the senses update the sense registers

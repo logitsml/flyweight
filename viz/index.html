@@ -1,0 +1,2134 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FlyWeight</title>
+<meta name="theme-color" content="#0d0e10">
+<script>/* the theme: ?theme=, then this viewer's last choice, then the system's; set before the page paints */
+(() => { let t = new URLSearchParams(location.search).get("theme"); try { t = t || localStorage.getItem("flyweight.theme"); } catch {}
+  if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  document.documentElement.dataset.theme = t; if (t === "light") document.querySelector('meta[name="theme-color"]').content = "#f0f3f6"; })();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..600&family=Geist+Mono:wght@400..600&family=Newsreader:ital,opsz,wght@0,6..72,400..500;1,6..72,400&display=swap">
+<style>
+/* An instrument, not a dashboard. Graphite surfaces (or paper, in the light theme), a stage for the 3D
+   views, and five accents that each mean one thing. Activity is light on the dark stage and ink on the
+   light one. The script reads the tokens from here, so the shaders, canvases and CSS share one palette. */
+:root {
+  color-scheme: dark;
+  --stage: #07080a;      /* behind the 3D views and plots */
+  --bg: #0d0e10;         /* the page */
+  --surface: #15171a;    /* panels */
+  --surface-2: #1f2225;  /* controls and wells */
+  --surface-3: #2b2e32;  /* raised and hovered controls */
+  --edge: rgb(255 255 255 / 0.06);
+  --text: #e9ebee;       /* 15:1 on panels */
+  --text-2: #a0a5ac;     /* 7:1 on panels, 6.4:1 on controls */
+  /* Five accents, one meaning each, at the same share of each hue's sRGB chroma (0.72) and in three
+     lightness tiers (OKLCH L .85 / .78 / .70), so every pair stays apart under protan, deutan and tritan
+     vision too (worst pair 0.087 in OKLab, Machado 2009); all at least 4.78:1 on every surface. */
+  --qwen: #f1c27d;       /* Qwen: its answer, the levels it sets, its neurons (L .84, h 76) */
+  --fly: #73e9d4;        /* the fly's neurons and spikes (L .86, h 180) */
+  --pool: #8cbdeb;       /* the nerve-cord pools the body reads (L .78, h 248) */
+  --motor: #e8758d;      /* the fly's motor output (L .70, h 8) */
+  --sense: #a68de5;      /* the fly's senses (L .70, h 296) */
+  --text-3: #8a9098;     /* placeholders and tick labels: 5:1 on controls */
+  --fill-muted: #6b7079; /* quiet marks: your segments on the timeline, list markers (3.6:1) */
+  --membrane: #b9bec6;   /* the neutral glow of a neuron nearing threshold; blue belongs to the pools */
+  --vote-away: #82868e;  /* a layer's vote against a move word */
+  --fly-dim: #1e423e;    /* a fly window in the report history: a quiet mark across a wide strip */
+  --on-accent: #0d0e10;  /* text on an accent fill: 11.7:1 on Qwen, 13.2:1 on the fly */
+  --qwen-text: var(--qwen); --fly-text: var(--fly); --motor-text: var(--motor);  /* an accent as text (the light theme deepens these) */
+  --qwen-solid: var(--qwen); --fly-solid: var(--fly);                           /* an accent filled behind text */
+  /* the light the CNS emits on its stage, the same in both themes; the light theme lays it down as ink */
+  --glow-qwen: #f1c27d; --glow-fly: #73e9d4; --glow-pool: #8cbdeb; --glow-motor: #e8758d; --glow-sense: #a68de5;
+  --wash: 255 255 255;   /* the channel of faint row and track washes, used with an alpha */
+  --shadow-panel: inset 0 1px 0 rgb(255 255 255 / 0.035), 0 1px 2px rgb(0 0 0 / 0.35), 0 16px 40px -24px rgb(0 0 0 / 0.7);
+  --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.4);
+  --vignette: rgb(7 8 10 / 0.55);
+  --scrim: rgb(7 8 10 / 0.7);
+  --r-1: 6px; --r-2: 10px; --r-3: 16px;  /* concentric: each step is the one inside it plus its padding */
+  --f-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --f-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --t-xs: 0.75rem;      /* 12: data, captions, labels */
+  --t-sm: 0.8125rem;    /* 13: controls, cells, panel titles */
+  --t-md: 0.875rem;     /* 14: body */
+  --t-prose: 0.9375rem; /* 15: serif prose, which runs small */
+  --t-lg: 1rem;         /* 16: inputs */
+  --t-xl: 2rem;         /* 32: the wordmark */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+/* Paper. Neutrals on the dark theme's cool hue (h 258). Each accent keeps its hue (Qwen leans from h 76 to 62,
+   where amber still reads as amber on white) in two roles: marks (bars, dots, spikes, rings) as light and vivid
+   as 3:1 on panels allows (OKLCH L .51-.66, 0.98 of each hue's sRGB chroma), in lightness tiers that keep the five
+   apart under protan, deutan and tritan vision (worst pair 0.086 in OKLab, Machado 2009); and text, at full
+   chroma and 4.5:1 on panels, the page and the stage, which also carries white text when filled. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --stage: #f5f7f9; --bg: #f0f3f6; --surface: #fdfdff; --surface-2: #e9ebef; --surface-3: #dce0e5;
+  --edge: rgb(15 20 30 / 0.09);
+  --text: #181c21;       /* 16:1 on panels */
+  --text-2: #565b63;     /* 6.7:1 on panels, 5.7:1 on controls */
+  --text-3: #60656d;     /* 4.9:1 on controls */
+  --fill-muted: #8e939a; /* 3:1 on panels */
+  --qwen: #cb790c; --fly: #0d917d; --pool: #076aae; --motor: #f33e80; --sense: #9c73fd;  /* marks: 3.3-5.6:1 on panels */
+  --qwen-text: #a45e04; --fly-text: #057c6a; --motor-text: #d80768;                       /* text: 4.9-5.0:1 on panels, 4.5:1 on the page */
+  --qwen-solid: #a45e04; --fly-solid: #057c6a;                                            /* white on them: 5.0:1 and 5.1:1 */
+  --membrane: #82868e; --vote-away: #858991; --fly-dim: #bfdcd4;
+  --on-accent: #ffffff;
+  --wash: 15 20 30;
+  --shadow-panel: 0 0 0 1px rgb(15 20 30 / 0.06), 0 1px 2px rgb(15 20 30 / 0.06), 0 12px 32px -20px rgb(15 20 30 / 0.22);
+  --shadow-raised: 0 0 0 1px rgb(15 20 30 / 0.08), 0 1px 2px rgb(15 20 30 / 0.12);
+  --vignette: rgb(120 128 140 / 0.16);
+  --scrim: rgb(253 253 255 / 0.8);
+}
+html { background: var(--bg); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 var(--t-md)/1.5 var(--f-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+::selection { background: color-mix(in oklab, var(--fly) 28%, transparent); color: var(--text); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[hidden] { display: none !important; }
+.app {
+  box-sizing: border-box; max-width: 2400px; margin-inline: auto; display: grid; gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(360px, 0.95fr);
+  grid-template-rows: auto minmax(420px, 56vh) auto auto;
+  grid-template-areas: "head head head" "world world qwen" "cns bridge qwen" "foot foot foot";
+  padding: 20px max(20px, env(safe-area-inset-right, 0px)) 28px max(20px, env(safe-area-inset-left, 0px));
+}
+.app.is-live { grid-template-rows: auto minmax(420px, 56vh) auto auto auto; grid-template-areas: "head head head" "world world qwen" "cns bridge qwen" "live live live" "foot foot foot"; }
+
+/* header: the wordmark and what this is on the left, the session's numbers on the right */
+.masthead { grid-area: head; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "mark facts tog" "tag facts tog"; align-items: end; gap: 6px 32px; padding: 4px 4px 8px; }
+.mtogs { grid-area: tog; align-self: end; display: flex; gap: 8px; }
+.mtoggle { display: inline-flex; align-items: center; gap: 8px; }
+.mtoggle::before { content: ""; width: 12px; height: 10px; border-radius: 2px; box-shadow: inset 0 0 0 1.5px currentColor; }  /* a screen */
+#themebtn::before { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(90deg, currentColor 50%, transparent 50%); }  /* half a disc */
+.mtoggle[aria-pressed="true"] { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--text-2); }
+.mark { grid-area: mark; margin: 0; font: 600 var(--t-xl)/1.1 var(--f-sans); letter-spacing: -0.03em; color: var(--text); white-space: nowrap; }
+.tag { grid-area: tag; margin: 0; max-width: 68ch; color: var(--text-2); font-size: var(--t-md); line-height: 1.5; text-wrap: pretty; }
+.facts { grid-area: facts; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 28px; margin: 0; }
+.facts div { display: grid; gap: 2px; min-width: 0; }
+.facts dt { font: 500 var(--t-xs)/1.3 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+.facts dd { margin: 0; font: 400 var(--t-md)/1.3 var(--f-mono); color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* panels: surfaces, not boxes */
+.panel { background: var(--surface); border-radius: var(--r-3); min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: var(--shadow-panel); }
+.ph { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding: 13px 16px 11px; flex: none; }
+.ph h2 { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; font: 500 var(--t-sm)/1.3 var(--f-sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--c, var(--text-2)); }
+.ph .meta { margin-inline-start: auto; font: 400 var(--t-xs)/1.3 var(--f-mono); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%; }
+#qstate[data-on="1"] { color: var(--qwen-text); }
+
+/* 3D views */
+.view { position: relative; flex: 1 1 auto; min-height: 240px; background: var(--stage); }
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: pan-y; }
+.view canvas:active { cursor: grabbing; }
+.view.world::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(120% 100% at 50% 45%, transparent 55%, var(--vignette) 100%); }
+.view > :not(canvas) { z-index: 2; }
+.view canvas:focus-visible, .transcript:focus-visible, .bridge-body:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.hud, .hint, .legend { position: absolute; pointer-events: none; background: var(--scrim); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.hud { left: 12px; top: 12px; max-width: calc(100% - 24px); box-sizing: border-box; padding: 8px 11px; border-radius: var(--r-2); font: 400 var(--t-xs)/1.55 var(--f-mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.hud:empty { display: none; }
+.hud .big { font: 500 var(--t-sm)/1.4 var(--f-sans); color: var(--text); margin-bottom: 1px; }
+.hud code { font: 400 var(--t-xs)/1.5 var(--f-mono); color: var(--fly-text); }
+.hud .v { color: var(--fly-text); } .hud .q { color: var(--qwen-text); }
+.hint { left: 6px; bottom: 6px; padding: 6px 10px; border-radius: var(--r-2); font: 400 var(--t-xs)/1.4 var(--f-sans); color: var(--text-2); }
+.legend { left: 6px; bottom: 6px; max-width: calc(100% - 12px); box-sizing: border-box; padding: 7px 11px; border-radius: var(--r-2); display: grid; gap: 4px; font: 400 var(--t-xs)/1.4 var(--f-sans); color: var(--text-2); }
+.legend > div { display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.legend span { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.legend span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.legend .ring::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); width: 8px; height: 8px; }
+.legend .cls::before { border-radius: 2px; width: 6px; height: 6px; }
+.labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.lab { position: absolute; transform: translate(14px, -50%); padding: 2px 7px; border-radius: var(--r-1); background: var(--scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); font: 500 var(--t-xs)/1.4 var(--f-sans); color: var(--text); white-space: nowrap; opacity: 0; }
+.lab::before { content: ""; position: absolute; left: -12px; top: 50%; width: 9px; height: 1px; background: currentColor; opacity: 0.6; }
+.lab.on { opacity: 1; }
+.lab.flyA { color: var(--fly-text); } .lab.flyB { color: var(--motor-text); }
+@media (prefers-reduced-motion: no-preference) { .lab { transition: opacity 150ms ease-out; } }
+.toolbar { position: absolute; right: 6px; bottom: 6px; }  /* 6px in from a 16px corner: the switch's 10px radius sits concentric */
+
+/* buttons, selects and the two-way switch */
+button, select { font: 500 var(--t-sm)/1 var(--f-sans); color: var(--text); background: var(--surface-2); border: 0; border-radius: var(--r-2); padding: 0 14px; min-height: 36px; cursor: pointer; box-shadow: inset 0 0 0 1px var(--edge); -webkit-tap-highlight-color: transparent; }
+select { appearance: none; -webkit-appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(-45deg, transparent 50%, var(--text-2) 50%); background-size: 4px 4px; background-position: calc(100% - 17px) 50%, calc(100% - 13px) 50%; background-repeat: no-repeat; font-variant-numeric: tabular-nums; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (hover: hover) { button:not(:disabled):hover, select:hover { background-color: var(--surface-3); } }
+@media (prefers-reduced-motion: no-preference) { button, select { transition-property: scale, background-color, color, box-shadow; transition-duration: 150ms; transition-timing-function: ease-out; } button:not(:disabled):active { scale: 0.96; } }
+button:focus-visible, select:focus-visible, .scrub:focus-visible, summary:focus-visible, #hist:focus-visible, input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-2); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--edge); }
+.toolbar.switch { background: var(--scrim); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.switch button { min-height: 30px; padding: 0 12px; border-radius: 7px; background: transparent; box-shadow: none; color: var(--text-2); }
+.switch button[aria-pressed="true"], .switch button[aria-checked="true"] { background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-raised); }
+@media (hover: hover) { .switch button:not(:disabled):hover { background: rgb(var(--wash) / 0.05); color: var(--text); } .switch button[aria-pressed="true"]:hover, .switch button[aria-checked="true"]:hover { background: var(--surface-3); } }
+
+/* the bridge: Qwen's answer, its levels, the descending neurons and the body; then senses, printed words, Qwen */
+.bridge-body { position: relative; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 12px; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#flow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.grid { position: relative; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.5fr) minmax(0, 1fr) minmax(0, 1.12fr); column-gap: 18px; }
+.grid .hd { font: 500 var(--t-xs)/1.3 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); padding: 2px 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.grid .hd::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
+.grid .hd.q { --c: var(--qwen); } .grid .hd.f { --c: var(--fly); } .grid .hd.m { --c: var(--motor); } .grid .hd.s { --c: var(--sense); }
+.cell { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; align-content: center; gap: 3px 6px; padding: 3px 0; min-height: 36px; box-sizing: border-box; }
+.cell .nm { grid-column: 1 / -1; font: 400 var(--t-sm)/1.3 var(--f-sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell.span2 { grid-column: span 2; }
+.cell .val { grid-column: 2; font: 400 var(--t-xs)/1.2 var(--f-mono); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+.cell .meter { grid-column: 1; grid-row: 2; align-self: center; height: 3px; border-radius: 2px; background: rgb(var(--wash) / 0.07); overflow: hidden; }
+.cell .meter i { display: block; height: 100%; width: 100%; transform: scaleX(0); transform-origin: left; border-radius: 2px; background: var(--c, var(--fly)); }
+.cell.q { --c: var(--qwen); } .cell.f { --c: var(--fly); } .cell.m { --c: var(--motor); } .cell.s { --c: var(--sense); } .cell.p { --c: var(--pool); }
+.cell.win .nm { justify-self: start; color: var(--on-accent); background: var(--qwen-solid); border-radius: 999px; padding: 0 8px; font-weight: 500; }
+.cell.reg .val { color: var(--text); }
+.cell .word { justify-self: start; padding: 1px 8px; border-radius: 999px; font: 500 var(--t-xs)/1.5 var(--f-mono); color: var(--fly-text); background: color-mix(in oklab, var(--fly) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fly) 22%, transparent); }
+.cell .word.lit { color: var(--on-accent); background: var(--fly-solid); box-shadow: none; }
+.gap { grid-column: 1 / -1; height: 14px; }
+.mute { grid-column: 1 / -1; font: 400 var(--t-xs)/1.4 var(--f-mono); color: var(--text-2); padding: 4px 0 0; }
+.doing { margin: 0; flex: none; padding: 11px 16px 13px; background: rgb(var(--wash) / 0.02); font: 400 var(--t-sm)/1.4 var(--f-sans); color: var(--text-2); display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: baseline; }
+.doing:empty { display: none; }
+.doing b { color: var(--text); font-weight: 500; display: inline-flex; align-items: center; gap: 8px; }
+.doing b::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--motor); }
+.doing span { font: 400 var(--t-xs)/1.4 var(--f-mono); font-variant-numeric: tabular-nums; }
+.doing .legs { display: inline-flex; align-items: flex-end; gap: 3px; height: 16px; margin-inline-start: auto; }
+.doing .legs i { width: 5px; border-radius: 1.5px; background: var(--motor); opacity: 0.85; min-height: 1px; }
+.doing .legs i:nth-child(2n) { margin-inline-end: 3px; }
+
+/* Qwen: the transcript and its neurons */
+.qcol { grid-area: qwen; display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; contain: size; }
+.qwen-panel { flex: 1 1 0; }
+.neur-panel { flex: none; }
+.transcript { flex: 1 1 0; min-height: 160px; overflow-y: auto; overscroll-behavior: contain; padding: 2px 16px 16px; display: flex; flex-direction: column; gap: 22px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.transcript > div { display: grid; gap: 12px; }
+.msg { font-size: var(--t-md); line-height: 1.5; min-width: 0; }
+.msg .who { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; font: 500 var(--t-xs)/1.3 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+.msg .who::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--c, var(--text-2)); }
+.msg.user .body { color: var(--text-2); font: italic 400 var(--t-prose)/1.5 var(--f-serif); text-wrap: pretty; }
+.msg.user details summary { cursor: pointer; width: fit-content; margin-top: 6px; min-height: 28px; display: flex; align-items: center; font: 500 var(--t-xs)/1.3 var(--f-sans); color: var(--text); }
+.msg.user .body.full { font: 400 var(--t-xs)/1.6 var(--f-mono); white-space: pre-wrap; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; margin-top: 6px; padding: 10px 12px; border-radius: var(--r-2); background: rgb(var(--wash) / 0.025); }
+.msg.qwen { --c: var(--qwen); }
+.msg.qwen .body { font: 400 var(--t-prose)/1.55 var(--f-serif); color: var(--text); white-space: pre-wrap; text-wrap: pretty; }
+.msg .call { font: 400 var(--t-xs)/1.5 var(--f-mono); color: var(--text-2); }
+.msg.read { --c: var(--qwen); padding: 11px 13px 12px; border-radius: var(--r-2); background: rgb(var(--wash) / 0.028); }
+.msg.read.live { background: color-mix(in oklab, var(--qwen) 7%, transparent); }
+.msg.read .body { font: 400 var(--t-xs)/1.6 var(--f-mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.read .senses { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; font: 400 var(--t-xs)/1.6 var(--f-mono); color: var(--text-2); }
+.said { display: inline-block; padding: 0 7px; border-radius: 999px; color: var(--fly-text); background: color-mix(in oklab, var(--fly) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fly) 22%, transparent); font-weight: 500; }
+.drive { display: grid; gap: 5px; margin-top: 2px; }
+.drv { display: grid; grid-template-columns: 5.2em minmax(0, 1fr) 3.2em; gap: 10px; align-items: center; font: 400 var(--t-xs)/1.4 var(--f-mono); }
+.drv .w { color: var(--text-2); }
+.drv.top .w { color: var(--qwen-text); font-weight: 500; }
+.drv .tr { display: block; height: 4px; background: rgb(var(--wash) / 0.06); border-radius: 2px; overflow: hidden; }
+.drv .fill { display: block; height: 100%; width: 100%; transform-origin: left; background: var(--qwen); border-radius: 2px; opacity: 0.45; }
+.drv.top .fill { opacity: 1; }
+.drv .q { text-align: end; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.levels { margin-top: 8px; font: 400 var(--t-xs)/1.6 var(--f-mono); color: var(--text-2); }
+.levels b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.msg.fly { --c: var(--fly); }
+.msg.fly .body { font: 400 var(--t-xs)/1.6 var(--f-mono); color: var(--text-2); white-space: pre-wrap; }
+.msg.fly .running { color: var(--fly-text); font-variant-numeric: tabular-nums; }
+.cursor { display: inline-block; width: 2px; height: 1em; background: var(--qwen); vertical-align: -2px; margin-inline-start: 2px; border-radius: 1px; }
+@media (prefers-reduced-motion: no-preference) { .cursor { animation: blink 1s steps(1) infinite; } }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* live chat: one standing message that Qwen reads in every report */
+.chat { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 16px 0; flex: none; }
+.chat input { font: 400 var(--t-lg)/1.4 var(--f-sans); color: var(--text); background: var(--surface-2); border: 0; border-radius: var(--r-2); padding: 0 12px; min-height: 40px; min-width: 0; box-sizing: border-box; box-shadow: inset 0 0 0 1px var(--edge); }
+.chat input::placeholder { color: var(--text-3); }
+.chat button { min-height: 40px; color: var(--on-accent); background: var(--qwen-solid); box-shadow: none; }
+@media (hover: hover) { .chat button:not(:disabled):hover { background-color: color-mix(in oklab, var(--qwen-solid) 82%, white); } }
+.standing { margin: 8px 16px 0; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--r-2); background: color-mix(in oklab, var(--qwen) 8%, transparent); }
+.standing > div { min-width: 0; padding: 4px 0; }
+.standing .slbl { display: block; font: 500 var(--t-xs)/1.3 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--qwen-text); }
+.standing q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font: italic 400 var(--t-prose)/1.4 var(--f-serif); color: var(--text); overflow-wrap: anywhere; }
+.standing button { min-height: 32px; padding: 0 12px; border-radius: var(--r-1); }
+.cap { margin: 0; font: 400 var(--t-xs)/1.5 var(--f-sans); color: var(--text-2); text-wrap: pretty; }
+.cap .flag { color: var(--fly-text); }
+.cap .ans { color: var(--qwen-text); font-family: var(--f-mono); }
+.chatcap { padding: 8px 16px 14px; flex: none; }
+
+/* Qwen's MLP neurons */
+.neur { padding: 0 16px 16px; display: grid; gap: 8px; }
+.plot { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 8px; }
+.axis { font: 400 var(--t-xs)/1 var(--f-mono); color: var(--text-2); display: flex; flex-direction: column; justify-content: space-between; text-align: end; padding-block: 1px; }
+#wall { width: 100%; height: 120px; display: block; border-radius: var(--r-1); background: var(--stage); }
+#votes { width: 100%; height: 88px; display: block; border-radius: var(--r-1); background: var(--stage); image-rendering: pixelated; }
+#hist { width: 100%; height: 44px; display: block; border-radius: var(--r-1); background: var(--stage); image-rendering: pixelated; cursor: pointer; }
+.plot + .cap { padding-left: calc(2.4em + 8px); margin-bottom: 6px; }
+.toplist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 16px; padding-left: calc(2.4em + 8px); margin-bottom: 8px; font: 400 var(--t-xs)/1.5 var(--f-mono); color: var(--text-2); }
+.toplist span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.toplist span b { color: var(--qwen-text); font-weight: 500; }
+.toplist span i { font-style: normal; color: var(--text); }
+.votes { display: grid; gap: 4px; }
+.vlab { display: grid; grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr)); font: 400 var(--t-xs)/1.3 var(--f-mono); color: var(--text-2); text-align: center; }
+.vlab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vlab .on { color: var(--qwen-text); font-weight: 500; }
+.sw { display: inline-block; width: 10px; height: 4px; border-radius: 2px; margin: 0 5px 1px 2px; vertical-align: middle; background: var(--c); }
+
+/* live: who drives, the command neurons, the senses, the world */
+.live-body { display: grid; grid-template-columns: minmax(200px, 0.75fr) minmax(0, 2fr) minmax(0, 1fr) auto; gap: 20px 40px; padding: 4px 16px 18px; align-items: start; }
+.lgroup { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 8px; align-content: start; }
+.lgroup legend, .lgroup .lh { padding: 0; margin-bottom: 4px; font: 500 var(--t-xs)/1.3 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+.pick { width: fit-content; }
+.pick button { min-width: 64px; }
+.sliders { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; }
+.sliders.one { grid-template-columns: minmax(0, 1fr); }
+.sl { --c: var(--text); display: grid; grid-template-columns: 5.6em minmax(0, 1fr) 1.8em; gap: 12px; align-items: center; min-height: 36px; font-size: var(--t-sm); }
+.sliders.qwen .sl { --c: var(--qwen); }
+.senses-set .sl { --c: var(--sense); }
+.sl label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.sl output { font: 400 var(--t-xs)/1 var(--f-mono); color: var(--text-2); text-align: end; font-variant-numeric: tabular-nums; }
+.sl input { -webkit-appearance: none; appearance: none; width: 100%; min-width: 0; height: 32px; margin: 0; background: transparent; cursor: pointer; }
+.sl input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--c) var(--p, 0%), var(--surface-3) var(--p, 0%)); }
+.sl input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.sl input::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--c); }
+.sl input::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 3px var(--surface), 0 1px 3px rgb(0 0 0 / 0.5); }
+.sl input::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 3px var(--surface), 0 1px 3px rgb(0 0 0 / 0.5); }
+.sl input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: 4px; }
+.acts { display: grid; gap: 8px; }
+.acts button { justify-content: start; text-align: start; }
+.acts button[aria-pressed="true"] { color: var(--qwen-text); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--qwen) 40%, transparent); }
+.livedot { --c: var(--fly); }
+.livedot.off { --c: var(--text-2); opacity: 0.6; }
+
+/* footer: the token stream, the raster and the transport share one surface */
+footer { grid-area: foot; display: grid; gap: 12px; min-width: 0; }
+.timeline { padding: 6px; gap: 6px; }
+.streamrow { height: 34px; border-radius: var(--r-2); background: var(--stage); display: flex; align-items: center; gap: 12px; padding-inline: 12px; overflow: hidden; }
+.stream { flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 4px; font: 400 var(--t-xs)/1 var(--f-mono); white-space: nowrap; -webkit-mask-image: linear-gradient(90deg, transparent, #000 64px); mask-image: linear-gradient(90deg, transparent, #000 64px); }
+.streamrow .lbl, .raster-wrap .lbl { font: 500 var(--t-xs)/1 var(--f-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
+.streamrow .lbl { flex: none; }
+.tk { padding: 3px 6px; border-radius: 5px; flex: none; }
+.tk.tick { color: var(--text-3); }
+.tk sub { font-size: 1em; vertical-align: -0.2em; line-height: 0; margin-inline-start: 1px; }
+.tk.spk { color: var(--fly-text); background: color-mix(in oklab, var(--fly) 7%, transparent); }
+.tk.spk.hot { color: var(--motor-text); background: color-mix(in oklab, var(--motor) 9%, transparent); }
+.tk.q { color: var(--qwen-text); background: color-mix(in oklab, var(--qwen) 7%, transparent); }
+.tk.say { color: var(--on-accent); background: var(--fly-solid); font-weight: 500; }
+.raster-wrap { position: relative; height: 72px; border-radius: var(--r-2); background: var(--stage); overflow: hidden; }
+#raster { width: 100%; height: 100%; display: block; }
+.raster-wrap .lbl { position: absolute; left: 12px; top: 9px; pointer-events: none; padding: 3px 6px; margin: -3px -6px; border-radius: 5px; background: var(--scrim); }
+.transport { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px 14px; align-items: center; padding: 2px 0 0; }
+.transport button { min-width: 76px; }
+#restart[aria-pressed="true"] { color: var(--fly-text); }
+#restart[aria-pressed="true"]::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--fly); margin-inline-end: 8px; vertical-align: 1px; }
+.scrub { position: relative; height: 40px; cursor: pointer; border-radius: var(--r-1); margin-inline: 4px; }
+.track { position: absolute; left: 0; right: 0; top: 24px; height: 4px; display: flex; }
+.seg { height: 100%; position: relative; min-width: 0; box-shadow: inset -2px 0 0 var(--surface); }  /* the gap is drawn, not laid out, so the playhead maps linearly */
+.seg:first-child { border-radius: 2px 0 0 2px; } .seg:last-child { border-radius: 0 2px 2px 0; }
+.seg.u { background: var(--fill-muted); } .seg.q { background: color-mix(in oklab, var(--qwen) 55%, transparent); } .seg.f { background: color-mix(in oklab, var(--fly) 45%, transparent); }
+.track.dense .seg { box-shadow: none; }
+.track.dense .seg span { display: none; }
+.seg span { position: absolute; top: -21px; left: 2px; max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; font: 400 var(--t-xs)/1.3 var(--f-sans); color: var(--text-2); white-space: nowrap; }
+.head { position: absolute; left: -1px; top: 16px; width: 2px; height: 20px; background: var(--text); border-radius: 1px; box-shadow: 0 0 0 2px var(--surface); }
+.note { font-size: var(--t-xs); color: var(--text-2); grid-column: 1 / -1; padding: 0 4px 2px; }
+details.how { padding: 0 4px; font-size: var(--t-md); color: var(--text-2); }
+details.how summary { cursor: pointer; width: fit-content; min-height: 32px; display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; list-style: none; }
+details.how summary::-webkit-details-marker { display: none; }
+details.how summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; rotate: -45deg; margin-inline: 2px 4px; }
+details.how[open] summary::before { rotate: 45deg; }
+@media (prefers-reduced-motion: no-preference) { details.how summary::before { transition: rotate 150ms ease-out; } }
+details.how ul { margin: 10px 0 4px; padding-inline-start: 20px; display: grid; gap: 8px; max-width: 72ch; line-height: 1.6; text-wrap: pretty; }
+details.how li::marker { color: var(--fill-muted); }
+details.how b { color: var(--text); font-weight: 500; }
+details.how code { font: 400 var(--t-xs)/1 var(--f-mono); color: var(--fly-text); }
+.err { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); padding: 20px; text-align: center; }
+
+@media (max-width: 1180px) {
+  .app, .app.is-live { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: none; }
+  .app { grid-template-areas: "head head" "world world" "cns bridge" "qwen qwen" "foot foot"; }
+  .app.is-live { grid-template-areas: "head head" "world world" "live live" "cns bridge" "qwen qwen" "foot foot"; }
+  .masthead { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "mark tog" "tag tag" "facts facts"; align-items: start; }
+  .facts { justify-content: flex-start; margin-top: 8px; }
+  .view { min-height: 380px; }
+  .view.world { min-height: 460px; }
+  .qcol { contain: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .qwen-panel { align-self: stretch; }
+  .transcript { flex: 1 1 auto; max-height: 480px; }
+  .bridge-body { max-height: 520px; }
+  .live-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .app { gap: 10px; padding: 14px max(12px, env(safe-area-inset-right, 0px)) 22px max(12px, env(safe-area-inset-left, 0px)); }
+  .app, .app.is-live { grid-template-columns: minmax(0, 1fr); }
+  .app { grid-template-areas: "head" "world" "bridge" "cns" "qwen" "foot"; }
+  .app.is-live { grid-template-areas: "head" "world" "live" "bridge" "cns" "qwen" "foot"; }
+  .mark { white-space: normal; }
+  .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; }
+  .view { min-height: 0; aspect-ratio: 1 / 1; flex: none; }
+  .view.world { min-height: 0; aspect-ratio: 4 / 5; }
+  .qcol { grid-template-columns: minmax(0, 1fr); }
+  .transcript { max-height: min(460px, 70vh); }
+  .grid { column-gap: 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 0.6fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .grid .hd { letter-spacing: 0.02em; gap: 5px; }
+  .bridge-body { max-height: none; }
+  .transport { grid-template-columns: auto auto minmax(0, 1fr); }
+  .transport select { grid-column: 3; justify-self: end; }
+  .transport .scrub { grid-column: 1 / -1; grid-row: 2; }
+  .toplist { grid-template-columns: minmax(0, 1fr); }
+  .hint { display: none; }
+  .legend { right: 6px; }
+  .live-body { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .sliders { grid-template-columns: minmax(0, 1fr); }
+  .acts { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .lgroup legend, .lgroup .lh { grid-column: 1 / -1; }
+}
+
+/* compact: everything on one screen. Wide windows lock to the viewport and every panel shares it;
+   explanatory text hides and long lists scroll inside their panels. Narrow windows only tighten. */
+.app.compact { gap: 8px; }
+.app.compact .tag, .app.compact .hint, .app.compact details.how, .app.compact .neur .cap, .app.compact .chatcap, .app.compact #drvcap, .app.compact .legend > div + div { display: none; }
+.app.compact .mark { font-size: 1.125rem; }
+.app.compact .ph { padding: 7px 12px 5px; }
+.app.compact .cell { min-height: 24px; padding: 1px 0; }
+.app.compact .grid .hd { padding: 0 0 3px; }
+.app.compact .bridge-body { padding: 0 12px 8px; }
+.app.compact .doing { padding: 6px 12px; }
+.app.compact .transcript { padding: 0 12px 10px; gap: 14px; }
+.app.compact .chat { padding: 8px 12px 0; }
+.app.compact .chat input, .app.compact .chat button { min-height: 34px; }
+.app.compact .standing { margin: 6px 12px 10px; }
+.app.compact .neur { padding: 0 12px 10px; gap: 5px; }
+.app.compact #wall { height: 64px; }
+.app.compact #votes { height: 44px; }
+.app.compact #hist { height: 26px; }
+.app.compact .live-body { gap: 6px 24px; padding: 0 12px 8px; }
+.app.compact .lgroup { gap: 4px; }
+.app.compact .lgroup legend, .app.compact .lgroup .lh { margin-bottom: 0; }
+.app.compact .sl { min-height: 26px; gap: 8px; }
+.app.compact .sl input { height: 22px; }
+.app.compact .acts button { min-height: 28px; }
+.app.compact footer { gap: 0; }
+.app.compact .timeline { padding: 4px; gap: 4px; }
+.app.compact .streamrow { height: 26px; }
+.app.compact .raster-wrap { height: 40px; }
+.app.compact .transport button, .app.compact .transport select { min-height: 30px; }
+@media (min-width: 1100px) {
+  .app.compact { height: 100dvh; overflow: hidden; padding: 8px 10px;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(300px, 0.8fr); grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1fr) auto; }
+  .app.compact.is-live { grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1fr) auto auto; }
+  .app.compact .masthead { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "mark facts tog"; align-items: center; padding: 0 4px; gap: 4px 24px; }
+  .app.compact .facts { gap: 4px 20px; }
+  .app.compact .facts div { display: flex; align-items: baseline; gap: 6px; }
+  .app.compact .facts dd { font-size: var(--t-sm); }
+  .app.compact .mtoggle { align-self: center; min-height: 30px; }
+  .app.compact .view { min-height: 0; }
+  .app.compact .qcol { gap: 8px; }
+  .app.compact .transcript { min-height: 0; }
+  .app.compact .live-body { grid-template-columns: auto minmax(0, 2.4fr) minmax(0, 1fr) auto; align-items: start; }
+  .app.compact #cmdsl { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 18px; }
+}
+</style>
+
+<div class="app" id="app">
+  <header class="masthead">
+    <h1 class="mark">FlyWeight</h1>
+    <p class="tag">A fruit fly's whole CNS runs inside Qwen3.5-4B as one model. Every 20 ms Qwen reads a report of its fly. Its answer drives the fly's neurons in the same forward pass.</p>
+    <dl class="facts" id="facts" aria-label="This session"></dl>
+    <div class="mtogs">
+      <button type="button" class="mtoggle" id="themebtn" aria-pressed="false" title="Paper instead of graphite">Light</button>
+      <button type="button" class="mtoggle" id="compact" aria-pressed="false" title="Fit every panel on one screen">Compact</button>
+    </div>
+  </header>
+
+  <section class="panel" style="grid-area: world" aria-labelledby="world-h">
+    <div class="ph"><h2 id="world-h"><i class="dot" aria-hidden="true"></i>The arena</h2><span class="meta" id="worldmeta"></span></div>
+    <div class="view world">
+      <canvas id="world" tabindex="0" role="img" aria-label="3D arena with the fly, the sugar and bitter drops and the perch. Arrow keys turn. Plus and minus zoom."></canvas>
+      <div class="labels" id="wlabels"></div>
+      <div class="hud" id="whud"><div class="big">Loading…</div></div>
+      <div class="toolbar switch" role="group" aria-label="Camera">
+        <button type="button" id="camA" aria-pressed="true">Follow the fly</button>
+        <button type="button" id="camW" aria-pressed="false">Whole arena</button>
+      </div>
+      <div class="hint">Drag to turn · ⌘ or Ctrl + scroll to zoom</div>
+    </div>
+  </section>
+
+  <section class="panel" style="grid-area: cns" aria-labelledby="cns-h">
+    <div class="ph"><h2 id="cns-h"><i class="dot" style="--c: var(--fly)" aria-hidden="true"></i>The fly's CNS</h2><span class="meta">166,700 neurons</span></div>
+    <div class="view cns">
+      <canvas id="brain" tabindex="0" role="img" aria-label="3D view of the fly's whole CNS. Spikes flash and ring. Glow is membrane potential. Halos mark the neuron groups the panels follow."></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="legend" aria-label="What the colours mean">
+        <div><span style="--c: var(--fly)">spike</span><span style="--c: var(--membrane)">membrane</span><span class="ring" style="--c: var(--qwen)">Qwen drives</span><span class="ring" style="--c: var(--sense)">senses</span><span class="ring" style="--c: var(--motor)">motor readout</span><span class="ring" style="--c: var(--pool)">body pools</span></div>
+        <div><span class="cls" style="--c: #b4c3ca">brain</span><span class="cls" style="--c: #8496ac">optic</span><span class="cls" style="--c: #aea4cf">sensory</span><span class="cls" style="--c: #9cbfa9">ascending</span><span class="cls" style="--c: #cdb994">descending</span><span class="cls" style="--c: #93a8d4">nerve cord</span><span class="cls" style="--c: #d898a6">motor</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" style="grid-area: bridge" aria-labelledby="bridge-h">
+    <div class="ph"><h2 id="bridge-h"><i class="dot" aria-hidden="true"></i>Qwen → Fly</h2></div>
+    <div class="bridge-body" tabindex="0" aria-label="How Qwen's answer reaches the fly's body. Below: what the fly prints back.">
+      <div class="grid" id="bridge"></div>
+    </div>
+    <p class="doing" id="doing"></p>
+  </section>
+
+  <div class="qcol">
+    <section class="panel qwen-panel" aria-labelledby="qwen-h">
+      <div class="ph"><h2 id="qwen-h"><i class="dot" style="--c: var(--qwen)" aria-hidden="true"></i>Qwen3.5-4B</h2><span class="meta" id="qstate">idle</span></div>
+      <div class="transcript" id="transcript" tabindex="0" aria-label="Transcript"></div>
+      <form class="chat" id="chat" hidden>
+        <input id="chatin" type="text" maxlength="300" autocomplete="off" enterkeyhint="send" aria-label="Message to Qwen" aria-describedby="chatcap" placeholder="Turn left.">
+        <button type="submit">Send</button>
+      </form>
+      <div class="standing" id="standing" hidden>
+        <div><span class="slbl" id="standinglbl">Qwen is reading</span><q id="standingtext"></q></div>
+        <button type="button" id="clearmsg">Clear</button>
+      </div>
+      <p class="cap chatcap" id="chatcap" hidden>Qwen reads your message in every report until you clear it.</p>
+    </section>
+    <section class="panel neur-panel" aria-labelledby="neur-h">
+      <div class="ph"><h2 id="neur-h"><i class="dot" style="--c: var(--qwen)" aria-hidden="true"></i>Qwen's MLP neurons</h2><span class="meta">32 layers × 9,216</span></div>
+      <div class="neur">
+        <div class="plot"><div class="axis" aria-hidden="true"><span>L0</span><span>L16</span><span>L31</span></div><canvas id="wall" role="img" aria-label="Qwen's MLP activations at the report's last token. One row per layer."></canvas></div>
+        <p class="cap" id="wallcap">Last token of the report</p>
+        <div class="toplist" id="toplist" aria-label="Strongest neurons at this token and the move each pushes"></div>
+        <div class="plot"><div class="axis" aria-hidden="true"><span>L0</span><span>L31</span></div><div class="votes"><canvas id="votes" role="img" aria-label="How each layer's strongest neurons vote on the seven move words at this token"></canvas><div class="vlab" id="vlab"></div></div></div>
+        <p class="cap">Each layer's vote on the move words. <span class="sw" style="--c: var(--qwen)"></span>toward <span class="sw" style="--c: var(--vote-away)"></span>away</p>
+        <div class="plot"><div class="axis" aria-hidden="true"><span>L0</span><span>L31</span></div><canvas id="hist" width="300" height="32" role="img" aria-label="Layer activity at each report. Teal marks fly windows. Click to jump. The playback slider does the same by keyboard."></canvas></div>
+        <p class="cap">One column per report. <span class="sw" style="--c: var(--fly-dim)"></span>marks a fly window. Click to jump.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" id="livepanel" style="grid-area: live" aria-labelledby="live-h" hidden>
+    <div class="ph"><h2 id="live-h"><i class="dot livedot off" id="livedot" aria-hidden="true"></i>Play with the fly</h2><span class="meta" id="livemeta">Connecting…</span></div>
+    <div class="live-body">
+      <div class="lgroup">
+        <span class="lh" id="drv-h">Who drives</span>
+        <div class="pick switch" role="radiogroup" aria-labelledby="drv-h">
+          <button type="button" role="radio" id="drvQ" aria-checked="true">Qwen</button>
+          <button type="button" role="radio" id="drvU" aria-checked="false">You</button>
+        </div>
+        <p class="cap" id="drvcap">Qwen's answer sets the command neurons.</p>
+      </div>
+      <fieldset class="lgroup"><legend>Command neurons</legend><div class="sliders" id="cmdsl"></div></fieldset>
+      <fieldset class="lgroup senses-set"><legend>Senses</legend><div class="sliders one" id="sensesl"></div></fieldset>
+      <div class="lgroup acts">
+        <span class="lh">World</span>
+        <button type="button" id="dust">Dust the antennae</button>
+        <button type="button" id="resetfly">Reset the fly</button>
+        <button type="button" id="pausemodel" aria-pressed="false">Pause the model</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="panel timeline">
+      <div class="streamrow" aria-hidden="true"><span class="lbl">Token stream</span><div class="stream" id="stream"></div></div>
+      <div class="raster-wrap"><canvas id="raster" role="img" aria-label="Spike raster of the fly in the current window"></canvas><span class="lbl" id="rasterlbl">Spike raster</span></div>
+      <div class="transport">
+        <button id="play" type="button">Pause</button>
+        <button id="restart" type="button">Restart</button>
+        <div class="scrub" id="scrub" tabindex="0" role="slider" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Start"><div class="track" id="track"></div><div class="head" id="headbar"></div></div>
+        <select id="speed" aria-label="Playback speed">
+          <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+        </select>
+        <div class="note" id="rmnote" hidden>Paused for your reduced-motion setting. Press Play to start.</div>
+      </div>
+    </div>
+    <div class="sr" role="status" id="announce"></div>
+    <details class="how">
+      <summary>How it works</summary>
+      <ul>
+        <li><b>Neurons are tokens.</b> A <code>TICK</code> token is one 0.1 ms step. <code>spk_j</code> means neuron j fired. Commands and senses are registers. Qwen's answer or a <code>DRIVE</code> token from the world writes them.</li>
+        <li><b>The CNS is three stock Qwen3.5 Gated DeltaNet layers</b> on Qwen's own 1,572,864-wide residual. Layer 1 holds the registers. Layer 2 is a 23-slot spike ring. Its 19-slot read passes through the connectome and gives the 1.8 ms delay. Layer 3 holds every membrane. Logits are membrane potentials. Greedy decoding is the spike threshold.</li>
+        <li><b>One stack.</b> Qwen's 32 layers and the fly's 3 share one residual, one vocabulary and one token stream. On fly tokens the weights mute Qwen exactly. On text tokens they keep the fly from writing. <span id="checkline">Checked against a float64 executor that matches Brian2 spike for spike.</span></li>
+        <li><b>Qwen's answer drives the fly.</b> At the report's last token the fly's first layer reads Qwen's final hidden state. Forward, left, right, back, jump, fly and groom each read their logit over stop (jump and fly over forward). Each drives one descending neuron type: P9, DNa02, MDN, the giant fiber, DNg02 or aDN. Left and right inhibit each other so only the favoured side turns, by its margin. A strong pull to either side stops the walk, so the fly turns in place.</li>
+        <li><b>The fly prints its senses.</b> After each scaffold word a <code>SAY</code> token lets the fly's layers pick the next word. LM-head rows read its taste neurons, MN9, Johnston's organ and flight motor neurons. Qwen then reads those words.</li>
+        <li><b>Light.</b> Glow is membrane potential from the logits. A spike flashes and sends out a ring. Halos mark the groups the bridge panel follows. The wall shows each layer's 48 strongest of 9,216 neurons, 8 to a column.</li>
+        <li><b>Body and world sit outside the neurons</b> as in NeuroMechFly. The body reads nerve-cord pools, the jump and flight motor neurons and MN9. It never reads the driven neurons. Gait and wingbeat are drawn.</li>
+        <li>Body: flybody (Vaxenburg et al. 2025). Connectome: Janelia male CNS v1.0 in Shiu et al.'s 2024 model, Kenyon-cell loops removed, counts scaled by 0.73.</li>
+      </ul>
+    </details>
+  </footer>
+</div>
+<script>
+(() => {
+"use strict";
+const $ = (id) => document.getElementById(id);
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const S = { tokRate: 14, simRate: 110, speed: 1, playing: !reduced };
+const LIVE = window.FLYWEIGHT_LIVE || null;  // set by scripts/run/serve.py: the model runs while you watch
+const setText = (el, t) => { if (el._t !== t) { el.textContent = t; el._t = t; } };
+const setHTML = (el, h) => { if (el._h !== h) { el.innerHTML = h; el._h = h; } };
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+const setAttr = (el, k, v) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
+// the palette lives in the CSS (:root); canvases and shaders read it from there
+const PAL = (() => {
+  const cs = getComputedStyle(document.documentElement), out = {};
+  const fall = { stage: "#07080a", surface: "#15171a", "surface-2": "#1f2225", text: "#e9ebee", "text-2": "#a0a5ac", qwen: "#efbe77", fly: "#83ded0", motor: "#f096a9", sense: "#bcb1ea", pool: "#94c4eb",
+    "vote-away": "#82868e", "fly-dim": "#3a7a72", "glow-qwen": "#f1c27d", "glow-fly": "#73e9d4", "glow-pool": "#8cbdeb", "glow-motor": "#e8758d", "glow-sense": "#a68de5" };
+  for (const [k, f] of Object.entries(fall)) {
+    const h = (cs.getPropertyValue("--" + k).trim() || f).replace("#", "");
+    out[k.replace("-", "")] = /^[0-9a-f]{6}$/i.test(h) ? [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) : [0, 2, 4].map((i) => parseInt(f.slice(1 + i, 3 + i), 16));
+  }
+  return out;
+})();
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const LIGHT = document.documentElement.dataset.theme === "light";
+const GLOW = { qwen: PAL.glowqwen, fly: PAL.glowfly, pool: PAL.glowpool, motor: PAL.glowmotor, sense: PAL.glowsense };  // the CNS's emitted light, both themes
+const v3 = (c, k = 1) => `vec3(${c.map((x) => (x / 255 * k).toFixed(4)).join(", ")})`;  // a palette colour as GLSL
+
+// ---------- data -------------------------------------------------------------------------
+function f16(h) {
+  const s = (h & 0x8000) ? -1 : 1, e = (h >> 10) & 0x1f, m = h & 0x3ff;
+  if (e === 0) return s * Math.pow(2, -14) * (m / 1024);
+  if (e === 31) return m ? NaN : s * Infinity;
+  return s * Math.pow(2, e - 15) * (1 + m / 1024);
+}
+function b64bytes(text) {  // base64 text to bytes (the replay files and the live server send text)
+  const s = atob(text.replace(/\s+/g, "")), u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+const gunzip = (u) => new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+async function gz(path) {
+  // gzip + base64 text: every file is served as text, and gzip keeps each one small
+  const r = await fetch(path); if (!r.ok) throw new Error(path + " " + r.status);
+  return gunzip(b64bytes(await r.text()));
+}
+function parseNeurons(buf) {
+  const n = new DataView(buf).getUint32(0, true);
+  return { n, pos: new Int16Array(buf, 4, n * 3), cls: new Uint8Array(buf, 4 + n * 6, n),
+           leg: new Uint8Array(buf, 4 + n * 7, n), role: new Uint8Array(buf, 4 + n * 8, n) };
+}
+function parseQwen(buf) {
+  const dv = new DataView(buf), nt = dv.getUint32(0, true), L = dv.getUint32(4, true), K = dv.getUint32(8, true);
+  const per = L * K * 4, toks = [], scale = new Float32Array(L);
+  for (let t = 0; t < nt; t++) {
+    const layers = [];
+    for (let l = 0; l < L; l++) {
+      const o = 12 + t * per + l * K * 4;
+      const idx = new Uint16Array(buf, o, K), raw = new Uint16Array(buf, o + K * 2, K), val = new Float32Array(K), sval = new Float32Array(K);
+      for (let k = 0; k < K; k++) { sval[k] = f16(raw[k]); val[k] = Math.abs(sval[k]); }
+      scale[l] = Math.max(scale[l], val[Math.floor(K * 0.1)]);
+      layers.push({ idx, val, sval });
+    }
+    toks.push(layers);
+  }
+  // per token, per layer energy: mean of the recorded |activations|, normalised per layer
+  const energy = new Float32Array(nt * L);
+  for (let t = 0; t < nt; t++) for (let l = 0; l < L; l++) {
+    const v = toks[t][l].val; let s = 0; for (let k = 0; k < K; k++) s += v[k];
+    energy[t * L + l] = s / K / (scale[l] || 1);
+  }
+  return { nt, L, K, toks, scale, energy };
+}
+
+// ---------- math ---------------------------------------------------------------------------
+function persp(fov, asp, n, f) { const t = 1 / Math.tan(fov / 2); return [t / asp,0,0,0, 0,t,0,0, 0,0,(f + n) / (n - f),-1, 0,0,2 * f * n / (n - f),0]; }
+function mul(a, b) { const o = new Array(16).fill(0); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) for (let k = 0; k < 4; k++) o[j * 4 + i] += a[k * 4 + i] * b[j * 4 + k]; return o; }
+function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]; }
+function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return [1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]; }
+function rotZ(a) { const c = Math.cos(a), s = Math.sin(a); return [c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]; }
+function trans(x, y, z) { return [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]; }
+function scale3(x, y, z) { return [x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]; }
+function normalMat(m) { // inverse transpose of the upper 3x3
+  const a = m[0], b = m[1], c = m[2], d = m[4], e = m[5], f = m[6], g = m[8], h = m[9], i = m[10];
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, det = a * A + b * B + c * C;
+  const inv = [A, -(b * i - c * h), b * f - c * e, B, a * i - c * g, -(a * f - c * d), C, -(a * h - b * g), a * e - b * d].map((x) => x / det);
+  return [inv[0], inv[3], inv[6], inv[1], inv[4], inv[7], inv[2], inv[5], inv[8]];
+}
+function segment(a, b, r) { // a unit sphere stretched between points a and b
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], len = Math.hypot(dx, dy, dz);
+  const y = [dx / len, dy / len, dz / len];
+  let x = Math.abs(y[1]) < 0.9 ? [y[2], 0, -y[0]] : [1, 0, 0];
+  const xl = Math.hypot(...x); x = x.map((v) => v / xl);
+  const z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+  const R = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, 0, 0, 0, 1];
+  return mul(trans((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2), mul(R, scale3(r, len / 2, r)));
+}
+
+// ---------- WebGL views --------------------------------------------------------------------
+// The CNS: each neuron a point. Spikes flash white, cool to the fly's colour and send out a ring.
+// Membrane potential is a soft glow. Halos mark the groups the panels follow. The far side recedes.
+const CLS_TINT = ["#8496ac", "#b4c3ca", "#aea4cf", "#8a9fbb", "#9cbfa9", "#cdb994", "#aea4cf", "#8a9fbb", "#d898a6", "#93a8d4", "#9aa2ab"]
+  .map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));  // by class id; muted so activity carries the colour
+const VS_PTS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos; layout(location=1) in float aCls; layout(location=2) in float aSpike; layout(location=3) in float aDep; layout(location=4) in float aGrp;
+uniform mat4 uMVP; uniform float uNow, uPx, uBase, uSize, uTime, uMotion, uDist;
+uniform float uLv[32]; uniform vec3 uKinds;  // per group: its halo level; the last command, sense and motor group ids
+out vec3 vCol, vAcc, vGlowCol, vHaloCol; out float vRing, vHalo, vCoreR, vRingR, vHaloR, vGlowR;
+vec3 classColor(float c) {
+${CLS_TINT.slice(0, 10).map((t, i) => `  if (c < ${i}.5) return ${v3(t)};`).join("\n")}
+  return ${v3(CLS_TINT[10])};
+}
+vec3 membrane(float t) {  // a neutral glow that brightens toward threshold (blue is the pools' colour, teal the spikes')
+  return mix(vec3(0.20, 0.23, 0.28), vec3(0.88, 0.92, 0.97), smoothstep(0.05, 1.0, t));
+}
+vec3 kindColor(float g) {  // the groups the session follows (export order): Qwen-driven, senses, motor, body pools
+  if (g < uKinds.x + 0.5) return ${v3(GLOW.qwen)};
+  if (g < uKinds.y + 0.5) return ${v3(GLOW.sense)};
+  if (g < uKinds.z + 0.5) return ${v3(GLOW.motor)};
+  return ${v3(GLOW.pool)};
+}
+void main() {
+  vec4 p = uMVP * vec4(aPos, 1.0); gl_Position = p;
+  float near = clamp(0.5 - (p.w - uDist) * 0.55, 0.0, 1.0);  // 1 on the CNS's near face, 0 on its far face
+  float age = uNow - aSpike, on = step(0.0, age);
+  float hot = on * exp(-age / 1.2);    // a white core for about a millisecond
+  float after = on * exp(-age / 6.5);  // then the fly's colour, fading over a few
+  float ring = (on > 0.5 && age < 18.0) ? age / 18.0 : -1.0;
+  int gi = int(aGrp + 0.5);
+  float lv = gi > 0 ? uLv[gi] : 0.0;
+  float breathe = 1.0 + 0.08 * sin(uTime * 1.7 + aPos.y * 20.0) * uMotion;
+  float isOut = (aCls > 4.5 && aCls < 5.5) || (aCls > 7.5 && aCls < 8.5) ? 1.0 : 0.0;  // descending and motor neurons flash in the motor colour
+  vAcc = mix(${v3(GLOW.fly)}, ${v3(GLOW.motor)}, isOut);
+  vCol = classColor(aCls) * uBase * mix(0.34, 1.0, near * near) + vAcc * after * 1.6 + vec3(1.0) * hot * 2.4;
+  vGlowCol = membrane(aDep) * aDep * mix(0.45, 1.0, near);
+  vHaloCol = kindColor(aGrp) * mix(0.5, 1.0, near);
+  vRing = ring; vHalo = gi > 0 ? (0.14 + 0.86 * lv) * breathe : 0.0;
+  float core = 1.1 + 0.75 * near + 7.5 * after + 2.5 * hot;
+  float glow = aDep > 0.02 ? 2.2 + 5.5 * aDep : 0.0;
+  float grow = ring >= 0.0 ? 1.0 - (1.0 - ring) * (1.0 - ring) : 0.0;  // fast at birth, easing out as it spreads
+  float rsz = ring >= 0.0 ? 4.0 + 20.0 * grow : 0.0;
+  float hsz = gi > 0 ? 5.0 + 12.0 * lv : 0.0;
+  float S = max(max(core, glow), max(rsz, hsz));
+  vCoreR = core / S; vRingR = rsz / S; vHaloR = hsz / S; vGlowR = glow / S;
+  gl_PointSize = uPx * uSize * S * (1.9 / max(p.w, 0.4));
+}`;
+const FS_PTS = `#version 300 es
+precision highp float;
+in vec3 vCol, vAcc, vGlowCol, vHaloCol; in float vRing, vHalo, vCoreR, vRingR, vHaloR, vGlowR; out vec4 o;
+void main() {
+  vec2 q = gl_PointCoord * 2.0 - 1.0; float r2 = dot(q, q); if (r2 > 1.0) discard;
+  float r = sqrt(r2), rc = r / max(vCoreR, 1e-3);
+  vec3 c = vCol * (exp(-rc * rc * 3.6) + 0.1 * exp(-rc * rc * 0.7));
+  if (vGlowR > 0.0) { float rg = r / vGlowR; c += vGlowCol * (exp(-rg * rg * 2.6) * 0.42 + exp(-rg * rg * 10.0) * 0.5); }
+  if (vRing >= 0.0) {  // thin and white at birth, wider and in the fly's colour as it fades
+    float fade = pow(1.0 - vRing, 2.5), d = (r - vRingR * 0.92) / mix(0.035, 0.1, vRing);
+    c += mix(vec3(0.92, 1.0, 1.0), vAcc, smoothstep(0.0, 0.3, vRing)) * exp(-d * d) * fade * 0.8
+       + vAcc * (1.0 - smoothstep(0.0, vRingR, r)) * fade * 0.05;
+  }
+  if (vHaloR > 0.0) { float rh = r / vHaloR, d = (rh - 0.82) / 0.07; c += vHaloCol * (exp(-d * d) * 0.38 + exp(-rh * rh * 2.8) * 0.14) * vHalo; }
+  o = vec4(c, 1.0);
+}`;
+const VS_ARC = `#version 300 es
+precision highp float;
+layout(location=0) in vec4 aP;  // xyz on the arc, w = position along it (0..1)
+uniform mat4 uMVP; out float vT;
+void main() { vT = aP.w; gl_Position = uMVP * vec4(aP.xyz, 1.0); }`;
+const FS_ARC = `#version 300 es
+precision highp float; in float vT; uniform vec3 uA, uB; uniform float uI, uPulse; out vec4 o;
+void main() {
+  float d = (vT - uPulse) / 0.06;
+  o = vec4(mix(uA, uB, vT) * uI * (0.12 + 1.3 * exp(-d * d)), 1.0);
+}`;
+const VS_MESH = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
+uniform mat4 uMVP, uModel; uniform mat3 uNM;
+out vec3 vN; out vec3 vL;
+void main() { vN = normalize(uNM * aNor); vL = aPos; gl_Position = uMVP * uModel * vec4(aPos, 1.0); }`;
+const FS_MESH = `#version 300 es
+precision highp float;
+in vec3 vN; in vec3 vL; uniform vec3 uCol; uniform float uAlpha, uStripe, uFacet; uniform vec3 uView; out vec4 o;
+void main() {
+  vec3 n = normalize(vN);
+  float key = max(dot(n, normalize(vec3(0.5, 0.8, 0.6))), 0.0);
+  float fill = max(dot(n, normalize(vec3(-0.6, 0.2, -0.4))), 0.0);
+  float rim = pow(1.0 - abs(dot(n, normalize(uView))), 2.5);
+  vec3 c = uCol * (0.18 + 0.75 * key + 0.25 * fill) + vec3(0.30, 0.55, 0.65) * rim * 0.45;
+  if (uStripe > 0.0) c *= 0.55 + 0.45 * smoothstep(-0.2, 0.2, sin(vL.y * 9.0));
+  if (uFacet > 0.0) { vec2 f = fract(vec2(atan(vL.z, vL.x) * 9.0, vL.y * 9.0)) - 0.5; c *= 0.8 + 0.25 * smoothstep(0.1, 0.35, length(f)); }
+  o = vec4(c * uAlpha, uAlpha);
+}`;
+const VS_QUAD = `#version 300 es
+layout(location=0) in vec2 aP; out vec2 vUV; void main(){ vUV = aP * 0.5 + 0.5; gl_Position = vec4(aP, 0.0, 1.0); }`;
+// bloom: a soft-knee bright pass at 1/4 size, blurred, then again at 1/8 for a wide, faint halo
+const FS_PRE = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uT; uniform vec2 uPx; uniform float uTh, uKnee; out vec4 o;
+void main() {  // a 4x4 box down in four bilinear taps, then the threshold, so only activity blooms
+  vec3 c = 0.25 * (texture(uT, vUV + uPx * vec2(-1.0, -1.0)).rgb + texture(uT, vUV + uPx * vec2(1.0, -1.0)).rgb
+                 + texture(uT, vUV + uPx * vec2(-1.0, 1.0)).rgb + texture(uT, vUV + uPx * vec2(1.0, 1.0)).rgb);
+  float br = max(c.r, max(c.g, c.b));
+  float s = clamp(br - uTh + uKnee, 0.0, 2.0 * uKnee); s = s * s / (4.0 * uKnee + 1e-4);
+  o = vec4(c * (max(s, br - uTh) / max(br, 1e-4)), 1.0);
+}`;
+const FS_BLUR = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uT; uniform vec2 uDir; out vec4 o;
+void main(){ float w[5] = float[](0.227, 0.194, 0.122, 0.054, 0.016); vec3 c = texture(uT, vUV).rgb * w[0];
+  for (int i = 1; i < 5; i++) { c += texture(uT, vUV + uDir * float(i)).rgb * w[i]; c += texture(uT, vUV - uDir * float(i)).rgb * w[i]; }
+  o = vec4(c, 1.0); }`;
+const FS_COMP = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uScene, uB1, uB2; uniform float uTime; uniform vec2 uRes; out vec4 o;
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+void main() {
+  vec2 d = vUV - 0.5; d.x *= uRes.x / uRes.y;
+  float rr = length(d);
+  vec3 hdr = texture(uScene, vUV).rgb + texture(uB1, vUV).rgb * 0.55 + texture(uB2, vUV).rgb * 0.7, c = aces(hdr * 0.95);
+${LIGHT ? `  vec3 paper = mix(${v3(PAL.stage, 1.012)}, ${v3(PAL.stage, 0.94)}, smoothstep(0.25, 1.05, rr));  // paper, a touch darker at the edges
+  float a = max(c.r, max(c.g, c.b));                                           // how much light, after the tone map
+  vec3 hue = hdr / max(max(hdr.r, max(hdr.g, hdr.b)), 1e-4);                   // its hue, before the tone map bleaches it
+  float w = smoothstep(0.05, 0.35, 1.0 - min(hue.r, min(hue.g, hue.b)));       // 0 for white light, 1 for an accent
+  vec3 ink = mix(vec3(0.50, 0.53, 0.58), pow(hue, vec3(1.5)) * 0.72, w);       // white light lays down graphite, an accent its own ink
+  c = paper * mix(vec3(1.0), ink, clamp(a * mix(1.0, 1.5, w), 0.0, 1.0) * mix(0.5, 0.95, w));  // activity in bright ink, the resting CNS in pencil` : `  float m = max(hdr.r, max(hdr.g, hdr.b)) * 0.95;
+  c = mix(c, hdr * 0.95 * aces(vec3(m)).r / max(m, 1e-4), 0.6);               // mostly hue-preserving, so bright spikes stay the fly's teal
+  c *= 1.0 - 0.45 * smoothstep(0.3, 1.0, rr);                                 // a gentle vignette
+  c += mix(${v3(PAL.stage, 1.9)}, ${v3(PAL.stage)}, smoothstep(0.0, 0.85, rr));  // the stage, lit a touch behind the CNS`}
+  float n = fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898, 78.233))) * 43758.5453);
+  o = vec4(c + (n - 0.5) * (1.5 / 255.0), 1.0);                                // dither against banding
+}`;
+
+function sphereMesh(seg = 28, rings = 18) {
+  const p = [], idx = [];
+  for (let r = 0; r <= rings; r++) {
+    const v = r / rings, th = v * Math.PI;
+    for (let s = 0; s <= seg; s++) { const u = s / seg, ph = u * 2 * Math.PI; p.push(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)); }
+  }
+  for (let r = 0; r < rings; r++) for (let s = 0; s < seg; s++) { const a = r * (seg + 1) + s, b = a + seg + 1; idx.push(a, a + 1, b, b, a + 1, b + 1); }  // counter-clockwise from outside
+  return { pos: new Float32Array(p), idx: new Uint16Array(idx) };
+}
+
+class View {
+  constructor(canvas, neu, opts) {
+    this.c = canvas; this.o = opts;
+    const gl = this.gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: false });
+    if (!gl) throw new Error("WebGL2 unavailable");
+    this.hdr = !!gl.getExtension("EXT_color_buffer_float");
+    const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+    const prog = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, v)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
+    this.pPts = prog(VS_PTS, FS_PTS); this.pPre = prog(VS_QUAD, FS_PRE); this.pBlur = prog(VS_QUAD, FS_BLUR); this.pComp = prog(VS_QUAD, FS_COMP); this.pArc = prog(VS_ARC, FS_ARC);
+    this.arcs = [];
+    this.N = neu.n;
+    this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao);
+    const buf = (data, loc, size, type, norm) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, type, norm, 0, 0); return b; };
+    buf(neu.pos, 0, 3, gl.SHORT, true); buf(neu.cls, 1, 1, gl.UNSIGNED_BYTE, false); buf(neu.grp, 4, 1, gl.UNSIGNED_BYTE, false);
+    this.spikeBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.spikeBuf); gl.bufferData(gl.ARRAY_BUFFER, this.N * 4, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+    this.depBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, this.depBuf); gl.bufferData(gl.ARRAY_BUFFER, this.N * 4, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    this.quad = gl.createVertexArray(); gl.bindVertexArray(this.quad);
+    const qb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    if (opts.body) {
+      this.pMesh = prog(VS_MESH, FS_MESH);
+      const m = sphereMesh();
+      this.meshVAO = gl.createVertexArray(); gl.bindVertexArray(this.meshVAO);
+      const pb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.bufferData(gl.ARRAY_BUFFER, m.pos, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0); // a unit sphere's normal is its position
+      const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+      this.meshCount = m.idx.length;
+    }
+    gl.bindVertexArray(null);
+    this.cam = { ...opts.cam };
+    this.resize();
+    this.bind();
+  }
+  target(w, h, depth) {
+    const gl = this.gl, tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, this.hdr ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, this.hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    let rb = null;
+    if (depth) { rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h); gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb); }
+    return { tex, fb, rb, w, h };
+  }
+  resize() {
+    const gl = this.gl;
+    for (const t of [this.scene, this.a, this.b, this.c8, this.d8]) if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); if (t.rb) gl.deleteRenderbuffer(t.rb); }
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.c.getBoundingClientRect();
+    this.W = Math.max(2, Math.round(r.width * dpr)); this.H = Math.max(2, Math.round(r.height * dpr));
+    this.c.width = this.W; this.c.height = this.H;
+    this.scene = this.target(this.W, this.H, true);
+    const bw = Math.max(2, this.W >> 2), bh = Math.max(2, this.H >> 2), cw = Math.max(2, this.W >> 3), ch = Math.max(2, this.H >> 3);
+    this.a = this.target(bw, bh); this.b = this.target(bw, bh);  // the tight bloom, at 1/4 size
+    this.c8 = this.target(cw, ch); this.d8 = this.target(cw, ch);  // the wide bloom, at 1/8
+  }
+  bind() {
+    const c = this.c, cam = this.cam; let drag = null;
+    c.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.dyaw, pitch: cam.pitch }; c.setPointerCapture(e.pointerId); });
+    c.addEventListener("pointermove", (e) => { if (!drag) return; cam.dyaw = drag.yaw + (e.clientX - drag.x) * 0.008; cam.pitch = Math.max(-1.3, Math.min(1.3, drag.pitch + (e.clientY - drag.y) * 0.006)); });
+    c.addEventListener("pointerup", () => { drag = null; });
+    c.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); cam.dist = Math.max(cam.min, Math.min(cam.max, cam.dist * Math.exp(e.deltaY * 0.001))); }, { passive: false });
+    c.addEventListener("keydown", (e) => {
+      const k = e.key; let used = true;
+      if (k === "ArrowLeft") cam.dyaw -= 0.15; else if (k === "ArrowRight") cam.dyaw += 0.15;
+      else if (k === "ArrowUp") cam.pitch = Math.max(-1.3, cam.pitch - 0.1); else if (k === "ArrowDown") cam.pitch = Math.min(1.3, cam.pitch + 0.1);
+      else if (k === "+" || k === "=") cam.dist = Math.max(cam.min, cam.dist / 1.12); else if (k === "-" || k === "_") cam.dist = Math.min(cam.max, cam.dist * 1.12);
+      else used = false;
+      if (used) e.preventDefault();
+    });
+  }
+  mvp() {
+    const cam = this.cam;
+    const P = persp(0.62, this.W / this.H, 0.05, 40);
+    const fit = Math.max(1, 1.12 / (this.W / this.H));  // a tall view backs off so the CNS's long axis still fits
+    this.camZ = cam.dist * fit;  // the depth of the CNS's centre, for the depth cue
+    return mul(P, mul(trans(0, cam.ty || 0, -cam.dist * fit), mul(rotX(cam.pitch), rotY(cam.yaw + cam.dyaw))));
+  }
+  uniforms(p, u) {
+    const gl = this.gl; let unit = 0;
+    for (const [k, v] of Object.entries(u)) {
+      const loc = gl.getUniformLocation(p, k); if (loc === null) continue;
+      if (v && v.tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, v.tex); gl.uniform1i(loc, unit++); }
+      else if (v instanceof Float32Array) gl.uniform1fv(loc, v);
+      else if (Array.isArray(v) && v.length === 16) gl.uniformMatrix4fv(loc, false, new Float32Array(v));
+      else if (Array.isArray(v) && v.length === 9) gl.uniformMatrix3fv(loc, false, new Float32Array(v));
+      else if (Array.isArray(v) && v.length === 3) gl.uniform3f(loc, v[0], v[1], v[2]);
+      else if (Array.isArray(v)) gl.uniform2f(loc, v[0], v[1]); else gl.uniform1f(loc, v);
+    }
+  }
+  pass(p, target, u) { const gl = this.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fb : null); gl.viewport(0, 0, target ? target.w : this.W, target ? target.h : this.H); gl.useProgram(p); gl.bindVertexArray(this.quad); this.uniforms(p, u); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+  draw(now, spikeArr, depArr, parts, fx) {
+    const gl = this.gl;
+    if (this.version !== stateVersion) {  // upload only when spikes or depolarization changed
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.spikeBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, spikeArr);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.depBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, depArr);
+      this.version = stateVersion;
+    }
+    const VP = this.mvp();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.scene.fb); gl.viewport(0, 0, this.W, this.H);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (parts) {
+      const yaw = this.cam.yaw + this.cam.dyaw, view = [Math.sin(-yaw) * Math.cos(this.cam.pitch), Math.sin(this.cam.pitch), Math.cos(yaw) * Math.cos(this.cam.pitch)];
+      gl.useProgram(this.pMesh); gl.bindVertexArray(this.meshVAO);
+      gl.enable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+      for (const pt of parts) if (pt.alpha >= 1) this.mesh(VP, pt, view);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+      for (const pt of parts) if (pt.alpha < 1) this.mesh(VP, pt, view);
+      gl.depthMask(true); gl.disable(gl.DEPTH_TEST);
+    }
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    gl.useProgram(this.pPts); gl.bindVertexArray(this.vao);
+    this.uniforms(this.pPts, { uMVP: this.o.brainModel ? mul(VP, this.o.brainModel) : VP, uNow: now, uPx: Math.max(1, this.W / 900), uBase: this.o.base, uSize: this.o.size,
+      uLv: fx.lv, uKinds: fx.kinds, uTime: fx.time, uMotion: fx.motion, uDist: this.camZ || 3 });
+    gl.drawArrays(gl.POINTS, 0, this.N);
+    if (fx.arcs) {  // the command pathways: a pulse from each driven descending group to the pool the body reads
+      gl.useProgram(this.pArc);
+      for (const [k, a] of this.arcs.entries()) {
+        const I = fx.arcs[k] || 0; if (I < 0.02) continue;
+        this.uniforms(this.pArc, { uMVP: this.o.brainModel ? mul(VP, this.o.brainModel) : VP, uA: GLOW.qwen.map((x) => x / 255), uB: a.colB, uI: I,
+          uPulse: fx.motion ? (fx.time * (0.5 + 0.7 * I) + k * 0.2) % 1.25 : 2.0 });
+        gl.bindVertexArray(a.vao); gl.drawArrays(gl.LINE_STRIP, 0, a.n);
+      }
+    }
+    gl.disable(gl.BLEND);
+    const { a, b, c8, d8 } = this;
+    this.pass(this.pPre, a, { uT: this.scene, uPx: [1 / this.W, 1 / this.H], uTh: 0.5, uKnee: 0.3 });
+    this.pass(this.pBlur, b, { uT: a, uDir: [1.3 / a.w, 0] });
+    this.pass(this.pBlur, a, { uT: b, uDir: [0, 1.3 / a.h] });
+    this.pass(this.pPre, c8, { uT: a, uPx: [0.5 / a.w, 0.5 / a.h], uTh: 0, uKnee: 0 });
+    this.pass(this.pBlur, d8, { uT: c8, uDir: [1.8 / c8.w, 0] });
+    this.pass(this.pBlur, c8, { uT: d8, uDir: [0, 1.8 / c8.h] });
+    this.pass(this.pComp, null, { uScene: this.scene, uB1: a, uB2: c8, uTime: fx.motion ? fx.time % 97 : 0, uRes: [this.W, this.H] });
+    return this.o.brainModel ? mul(VP, this.o.brainModel) : VP;
+  }
+  setArcs(list) {  // list: [{from: [x, y, z], to: [x, y, z], colB}] in the neurons' normalised frame
+    const gl = this.gl, n = 48;
+    this.arcs = list.map(({ from, to, colB }) => {
+      const mid = from.map((v, i) => (v + to[i]) / 2), lift = Math.hypot(...from.map((v, i) => v - to[i])) * 0.35;
+      const pts = new Float32Array(n * 4);
+      for (let j = 0; j < n; j++) { const t = j / (n - 1), u = 1 - t;
+        for (let i = 0; i < 3; i++) pts[j * 4 + i] = u * u * from[i] + 2 * u * t * (mid[i] + (i === 2 ? lift : 0)) + t * t * to[i];
+        pts[j * 4 + 3] = t; }
+      const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+      const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, pts, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+      return { vao, n, colB };
+    });
+  }
+  mesh(VP, pt, view) {
+    const gl = this.gl;
+    this.uniforms(this.pMesh, { uMVP: VP, uModel: pt.m, uNM: normalMat(pt.m), uCol: pt.col, uAlpha: pt.alpha, uStripe: pt.stripe || 0, uFacet: pt.facet || 0, uView: view });
+    gl.drawElements(gl.TRIANGLES, this.meshCount, gl.UNSIGNED_SHORT, 0);
+  }
+}
+
+// ---------- agent session data -----------------------------------------------------------------
+function parseWindow(buf) {
+  const dv = new DataView(buf); let o = 0;
+  const u32 = (len) => { const a = new Uint32Array(buf, o, len); o += 4 * len; return a; };
+  const nf = dv.getUint32(o, true); o += 4;
+  const flies = [];
+  for (let b = 0; b < nf; b++) {
+    const ns = dv.getUint32(o, true), np = dv.getUint32(o + 4, true), nm = dv.getUint32(o + 8, true), ng = dv.getUint32(o + 12, true); o += 16;
+    const step = u32(ns), idx = u32(ns), pstep = u32(np), pidx = u32(np), mstep = u32(nm), starts = u32(nm + 1), gidx = u32(ng);
+    const glev = new Uint8Array(buf, o, ng); o += ng + ((4 - (ng % 4)) % 4);
+    flies.push({ step, idx, pstep, pidx, mstep, starts, gidx, glev });
+  }
+  return flies;
+}
+let BC = 12;  // floats per body row (D.body_cols): t ms, x, y, z, yaw, air, fwd, back, turn, power, MN9 Hz, groom, then each leg's Hz
+let LEG_HZ = 12;  // a leg bar is full at this rate (D.leg_hz)
+function parseBodies(buf) {
+  const dv = new DataView(buf); let o = 4; const nf = dv.getUint32(0, true), out = [];
+  for (let b = 0; b < nf; b++) { const n = dv.getUint32(o, true); o += 4; out.push(new Float32Array(buf.slice(o, o + n * 4 * BC))); o += n * 4 * BC; }
+  return out;
+}
+function parseFlyMesh(buf) {
+  const dv = new DataView(buf); const np = dv.getUint32(0, true), span = dv.getFloat32(4, true); let o = 8; const parts = [];
+  for (let p = 0; p < np; p++) {
+    const nv = dv.getUint32(o, true), nf = dv.getUint32(o + 4, true), body = dv.getUint32(o + 8, true); o += 12;
+    const pos = new Int16Array(buf.slice(o, o + nv * 6)); o += nv * 6;
+    const nrm = new Int8Array(buf.slice(o, o + nv * 4)); o += nv * 4;
+    const idx = new Uint32Array(buf.slice(o, o + nf * 12)); o += nf * 12;
+    parts.push({ nv, nf, body, pos, nrm, idx });
+  }
+  return { parts, span };
+}
+function quatMat(q) {  // MuJoCo quaternion (w, x, y, z) -> column-major 4x4
+  const [w, x, y, z] = q;
+  return [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
+          2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
+          2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0, 0, 0, 0, 1];
+}
+function axisAngle(a, t) {
+  const [x, y, z] = a, c = Math.cos(t), s = Math.sin(t), k = 1 - c;
+  return [c + x * x * k, y * x * k + z * s, z * x * k - y * s, 0, x * y * k - z * s, c + y * y * k, z * y * k + x * s, 0,
+          x * z * k + y * s, y * z * k - x * s, c + z * z * k, 0, 0, 0, 0, 1];
+}
+function lookAt(eye, at) {
+  const f = [at[0] - eye[0], at[1] - eye[1], at[2] - eye[2]], fl = Math.hypot(...f); f.forEach((v, i) => f[i] = v / fl);
+  const up = [0, 0, 1];
+  let s = [f[1] * up[2] - f[2] * up[1], f[2] * up[0] - f[0] * up[2], f[0] * up[1] - f[1] * up[0]]; const sl = Math.hypot(...s) || 1; s = s.map((v) => v / sl);
+  const u = [s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0]];
+  return [s[0], u[0], -f[0], 0, s[1], u[1], -f[1], 0, s[2], u[2], -f[2], 0,
+          -(s[0] * eye[0] + s[1] * eye[1] + s[2] * eye[2]), -(u[0] * eye[0] + u[1] * eye[1] + u[2] * eye[2]), f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2], 1];
+}
+
+// ---------- the world: flybody flies in an arena ---------------------------------------------------
+const VS_W = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor;
+uniform mat4 uVP, uModel; uniform mat3 uNM; uniform float uScale;
+out vec3 vW; out vec3 vN; out vec3 vL;
+void main() { vec4 w = uModel * vec4(aPos * uScale, 1.0); vW = w.xyz; vN = normalize(uNM * aNor); vL = aPos * uScale; gl_Position = uVP * w; }`;
+// The arena as a specimen stage: one lamp over the fly, a floor that falls off into the dark, soft shadows
+const FOG = PAL.stage.map((x, i) => x + (PAL.surface[i] - x) * 0.35);  // the haze the far floor fades into
+const FS_W = `#version 300 es
+precision highp float;
+in vec3 vW; in vec3 vN; in vec3 vL;
+uniform vec3 uCol, uCam; uniform float uAlpha, uMat, uTime, uGlow, uGround;
+uniform vec4 uSpot;    // xy: where the lamp points, z: the radius of its pool of light
+uniform vec2 uFog;     // fog starts and is full at these distances from the eye (mm)
+uniform vec4 uOcc[3];  // sugar, bitter, perch: xy, radius, height, for their shadows on the floor
+out vec4 o;
+float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x) { vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+float fbm(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s; }
+float segDist(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0); return length(pa - ba * h); }
+void main() {
+  vec3 n = normalize(vN), v = normalize(uCam - vW);
+  if (!gl_FrontFacing) n = -n;
+  vec3 L1 = normalize(vec3(0.45, -0.35, 0.85)), L2 = normalize(vec3(-0.6, 0.5, 0.4));
+  vec3 col = uCol; float spec = 0.25, shin = 40.0, alpha = uAlpha, ao = 1.0; int m = int(uMat + 0.5);
+  float ct = abs(dot(n, v)), fres = pow(1.0 - ct, 4.0);
+  if (m == 0 || m == 6) {           // cuticle: fine grain and a waxy sheen
+    float g = fbm(vL * 900.0); col *= 0.84 + 0.28 * g; spec = 0.3; shin = 60.0;
+  } else if (m == 1) {              // compound eye: hexagonal ommatidia
+    vec3 q = vL * 2600.0; vec2 h = vec2(q.x + q.z * 0.5, q.y + q.z * 0.866);
+    vec2 c = fract(h) - 0.5; float d = max(abs(c.x), abs(c.y));
+    col *= 0.62 + 0.55 * smoothstep(0.5, 0.18, d); spec = 1.0; shin = 140.0;
+  } else if (m == 2 || m == 3 || m == 4) { spec = 0.55; shin = 90.0;
+  } else if (m == 5) { spec = 0.35; shin = 50.0;
+  } else if (m == 7) {              // wing membrane: a faint thin-film sheen
+    vec3 film = 0.5 + 0.5 * cos(6.2832 * (vec3(0.0, 0.33, 0.67) + 2.2 * ct));
+    col = mix(vec3(${LIGHT ? "0.42, 0.46, 0.52" : "0.78, 0.82, 0.86"}), film, 0.3); alpha = (0.14 + 0.32 * pow(1.0 - ct, 3.0)) * uAlpha; spec = 0.8; shin = 120.0;
+  } else if (m == 8) {              // the floor: agar with a 10 mm grid, and 2 mm ticks up close
+    vec2 p = vW.xy;
+    col = mix(vec3(${LIGHT ? "0.80, 0.795, 0.78" : "0.36, 0.355, 0.34"}), vec3(${LIGHT ? "0.88, 0.875, 0.86" : "0.45, 0.44, 0.42"}), fbm(vec3(p * 0.3, 0.0)) * 0.6 + fbm(vec3(p * 2.7, 3.1)) * 0.4);
+    vec2 a10 = p / 10.0, w10 = max(fwidth(a10), vec2(1e-4)), f10 = abs(fract(a10 - 0.5) - 0.5) / w10;
+    vec2 a2 = p / 2.0, w2 = max(fwidth(a2), vec2(1e-4)), f2 = abs(fract(a2 - 0.5) - 0.5) / w2;
+    float l10 = 1.0 - clamp(min(f10.x, f10.y) - 0.3, 0.0, 1.0);
+    float l2 = (1.0 - clamp(min(f2.x, f2.y), 0.0, 1.0)) * (1.0 - smoothstep(0.06, 0.25, max(w2.x, w2.y)));
+    col += vec3(${LIGHT ? "-0.075, -0.073, -0.07" : "0.05, 0.052, 0.056"}) * (l10 * 0.9 + l2 * 0.3);  // grid lines: lighter on the dark floor, darker on the light one
+    vec2 lx = -L1.xy / L1.z;
+    for (int i = 0; i < 3; i++) {   // soft shadows of the drops and the perch, and occlusion where they meet the floor
+      vec4 q = uOcc[i];
+      float glass = i < 2 ? 0.4 : 1.0, d = segDist(p, q.xy, q.xy + lx * q.w) - q.z, pen = 0.5 + 0.12 * q.w;
+      ao *= 1.0 - glass * 0.5 * (1.0 - smoothstep(-pen, pen, d));
+      ao *= 1.0 - 0.3 * exp(-max(length(p - q.xy) - q.z, 0.0) / (0.15 * q.z + 0.5));
+    }
+    spec = 0.05; shin = 12.0;
+  } else if (m == 9) {              // the walls: glass, seen only at grazing angles
+    col = vec3(0.72, 0.78, 0.84); alpha = (0.008 + 0.07 * fres) * uAlpha; spec = 0.3; shin = 80.0;
+  } else if (m == 10) {             // the sugar drop: clear honey, warming while the sugar neurons fire
+    alpha = 0.32 + 0.55 * pow(1.0 - ct, 2.0) + 0.25 * uGlow; spec = 1.4; shin = 240.0;
+    col += vec3(1.0, 0.74, 0.36) * uGlow * (0.45 + 0.55 * pow(1.0 - ct, 2.0));
+  } else if (m == 11) {             // the bitter drop: violet glass
+    alpha = 0.4 + 0.5 * pow(1.0 - ct, 2.0); spec = 1.3; shin = 220.0;
+  } else if (m == 12) {             // perch: walnut, end grain on top
+    float g = n.z > 0.7 ? 0.5 + 0.5 * sin(length(vL.xy) * 70.0 + fbm(vL * 4.0) * 6.0) : fract(atan(vL.y, vL.x) * 3.0 + fbm(vec3(vL.xy * 2.0, vL.z * 6.0)) * 1.5);
+    col *= n.z > 0.7 ? 0.9 + 0.08 * g : 0.86 + 0.16 * g; spec = 0.12; shin = 18.0;
+    ao *= mix(0.5, 1.0, smoothstep(0.0, 3.5, vW.z));
+  } else if (m == 13) {             // contact shadow under a fly: a tight core in a wide penumbra
+    float r = length(vL.xy);
+    o = vec4(0.0, 0.0, 0.0, uAlpha * (exp(-r * r * 4.5) * 0.75 + exp(-r * r * 1.5) * 0.25) * (1.0 - smoothstep(0.8, 1.0, r))); return;
+  } else if (m == 14) {             // the current goal: a thin ring of light on the floor
+    float r = length(vL.xy), pulse = fract(uTime * uGlow * 0.5);
+    float a = exp(-pow((r - 0.9) / 0.016, 2.0)) * 0.42 + exp(-pow((r - pulse * 0.9) / 0.035, 2.0)) * (1.0 - pulse) * 0.16 * step(0.001, uGlow);
+    o = vec4(uCol * a * uAlpha, a * uAlpha * 0.8); return;
+  }
+  float lamp = mix(${LIGHT ? "0.9" : "0.3"}, 1.0, exp(-pow(length(vW.xy - uSpot.xy) / uSpot.z, 2.0)));
+  float dif = max(dot(n, L1), 0.0) * 0.9 + max(dot(n, L2), 0.0) * 0.18, hemi = 0.5 + 0.5 * n.z;
+  float sp = pow(max(dot(n, normalize(L1 + v)), 0.0), shin) * spec;
+  if (m <= 7) ao *= mix(0.6, 1.0, smoothstep(0.0, 0.8, vW.z - uGround));  // legs darken where they meet the ground
+  vec3 amb = mix(vec3(${LIGHT ? "0.36, 0.37, 0.39" : "0.07, 0.075, 0.085"}), vec3(${LIGHT ? "0.50, 0.51, 0.53" : "0.19, 0.2, 0.215"}), hemi);
+  vec3 c = col * (amb + dif * lamp * vec3(1.0, 0.97, 0.93)) * ao + vec3(sp * lamp * ao) + vec3(0.62, 0.72, 0.82) * fres * 0.14 * lamp;
+  c = pow(c / (1.0 + c * 0.3), vec3(0.94));
+  c = mix(c, ${v3(FOG)}, smoothstep(uFog.x, uFog.y, length(uCam - vW)) * 0.94);
+  o = vec4(c * alpha, alpha);
+}`;
+const VS_LINE = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos; uniform mat4 uVP; uniform float uN; out float vA;
+void main() { vA = float(gl_VertexID) / max(uN - 1.0, 1.0); gl_Position = uVP * vec4(aPos, 1.0); }`;
+const FS_LINE = `#version 300 es
+precision highp float; in float vA; uniform vec4 uC; out vec4 o; void main(){ float a = uC.a * vA * vA; o = vec4(uC.rgb * a, a); }`;  // the trail fades with age
+const MATS = { body: 0, red: 1, ocelli: 2, black: 3, "bristle-brown": 4, brown: 5, lower: 6, membrane: 7 };
+
+function cylinderMesh(seg = 40) {
+  const p = [], idx = [];
+  for (let s = 0; s <= seg; s++) { const a = s / seg * 2 * Math.PI, c = Math.cos(a), sn = Math.sin(a); p.push(c, sn, 0, c, sn, 0, c, sn, 1, c, sn, 0); }
+  for (let s = 0; s < seg; s++) { const a = s * 2, b = a + 2; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  const top = p.length / 6; p.push(0, 0, 1, 0, 0, 1);
+  for (let s = 0; s <= seg; s++) { const a = s / seg * 2 * Math.PI; p.push(Math.cos(a), Math.sin(a), 1, 0, 0, 1); }
+  for (let s = 0; s < seg; s++) idx.push(top, top + 1 + s, top + 2 + s);
+  return { pn: new Float32Array(p), idx: new Uint16Array(idx) };
+}
+function interleavedSphere(seg = 36, rings = 20) {
+  const m = sphereMesh(seg, rings), pn = new Float32Array(m.pos.length * 2);
+  for (let i = 0; i < m.pos.length / 3; i++) for (let k = 0; k < 3; k++) { pn[i * 6 + k] = m.pos[i * 3 + k]; pn[i * 6 + 3 + k] = m.pos[i * 3 + k]; }
+  return { pn, idx: m.idx };
+}
+
+class WorldView {
+  constructor(canvas, mesh, skel) {
+    this.c = canvas;
+    const gl = this.gl = canvas.getContext("webgl2", { antialias: true, premultipliedAlpha: true, alpha: false });
+    if (!gl) throw new Error("WebGL2 unavailable");
+    const sh = (t, s) => { const x = gl.createShader(t); gl.shaderSource(x, s); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+    const prog = (v, f) => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, v)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, f)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
+    this.p = prog(VS_W, FS_W); this.pl = prog(VS_LINE, FS_LINE);
+    this.loc = {}; for (const n of ["uVP", "uModel", "uNM", "uScale", "uCol", "uCam", "uAlpha", "uMat", "uTime", "uGlow", "uGround", "uSpot", "uFog", "uOcc"]) this.loc[n] = gl.getUniformLocation(this.p, n);
+    this.lloc = {}; for (const n of ["uVP", "uN", "uC"]) this.lloc[n] = gl.getUniformLocation(this.pl, n);
+    // fly parts
+    this.span = mesh.span;
+    this.parts = mesh.parts.map((pt, k) => {
+      const meta = skel.parts[k], vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+      const b1 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b1); gl.bufferData(gl.ARRAY_BUFFER, pt.pos, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.SHORT, true, 0, 0);
+      const b2 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b2); gl.bufferData(gl.ARRAY_BUFFER, pt.nrm, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.BYTE, true, 4, 0);
+      const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, pt.idx, gl.STATIC_DRAW);
+      const mat = MATS[meta.mat] ?? 0;
+      return { vao, n: pt.idx.length, body: pt.body, mat, col: meta.rgba.slice(0, 3), alpha: mat === 7 ? 1 : (meta.rgba[3] ?? 1) };
+    });
+    const simple = (m) => { const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+      const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, m.pn, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+      return { vao, n: m.idx.length, type: m.idx instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT }; };
+    this.quad = simple({ pn: new Float32Array([-1,-1,0,0,0,1, 1,-1,0,0,0,1, 1,1,0,0,0,1, -1,1,0,0,0,1]), idx: new Uint16Array([0,1,2, 0,2,3]) });
+    this.sphere = simple(interleavedSphere()); this.cyl = simple(cylinderMesh());
+    this.trailBuf = gl.createBuffer(); this.trailVAO = gl.createVertexArray(); gl.bindVertexArray(this.trailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.vertexAttrib3f(1, 0, 0, 1);
+    gl.bindVertexArray(null);
+    // skeleton
+    this.bodies = skel.bodies.map((b) => ({ parent: b.parent, local: mul(trans(...b.pos), quatMat(b.quat)), joints: [] }));
+    for (const j of skel.joints) if (j.type === 3) this.bodies[j.body].joints.push({ name: j.name, axis: j.axis, pos: j.pos, range: j.range });
+    this.cam = { yaw: -2.2, pitch: 0.42, dist: 11, dyaw: 0, min: 3, max: 400, mode: 0 };
+    this.bind(); this.resize();
+  }
+  resize() { const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.c.getBoundingClientRect(); this.W = Math.max(2, Math.round(r.width * dpr)); this.H = Math.max(2, Math.round(r.height * dpr)); this.c.width = this.W; this.c.height = this.H; }
+  bind() {
+    const c = this.c, cam = this.cam; let drag = null;
+    c.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw: cam.dyaw, pitch: cam.pitch }; c.setPointerCapture(e.pointerId); });
+    c.addEventListener("pointermove", (e) => { if (!drag) return; cam.dyaw = drag.yaw - (e.clientX - drag.x) * 0.008; cam.pitch = Math.max(0.05, Math.min(1.45, drag.pitch + (e.clientY - drag.y) * 0.006)); });
+    c.addEventListener("pointerup", () => { drag = null; });
+    c.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); cam.dist = Math.max(cam.min, Math.min(cam.max, cam.dist * Math.exp(e.deltaY * 0.0015))); }, { passive: false });
+    c.addEventListener("keydown", (e) => {
+      const k = e.key; let used = true;
+      if (k === "ArrowLeft") cam.dyaw += 0.12; else if (k === "ArrowRight") cam.dyaw -= 0.12;
+      else if (k === "ArrowUp") cam.pitch = Math.min(1.45, cam.pitch + 0.08); else if (k === "ArrowDown") cam.pitch = Math.max(0.05, cam.pitch - 0.08);
+      else if (k === "+" || k === "=") cam.dist = Math.max(cam.min, cam.dist / 1.15); else if (k === "-" || k === "_") cam.dist = Math.min(cam.max, cam.dist * 1.15);
+      else used = false;
+      if (used) e.preventDefault();
+    });
+  }
+  fk(root, q) {  // body world matrices for one fly; q: joint name -> angle
+    const out = new Array(this.bodies.length);
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
+      let m = i === 0 ? trans(0, 0, 0) : mul(i === 1 ? root : out[b.parent], b.local);
+      for (const j of b.joints) {
+        const a = q[j.name]; if (!a) continue;
+        const t = Math.max(j.range[0], Math.min(j.range[1], a));
+        m = mul(m, mul(trans(...j.pos), mul(axisAngle(j.axis, t), trans(-j.pos[0], -j.pos[1], -j.pos[2]))));
+      }
+      out[i] = m;
+    }
+    return out;
+  }
+  setU(model, col, alpha, mat, scale) {
+    const gl = this.gl, L = this.loc;
+    gl.uniformMatrix4fv(L.uModel, false, new Float32Array(model)); gl.uniformMatrix3fv(L.uNM, false, new Float32Array(normalMat(model)));
+    gl.uniform3f(L.uCol, col[0], col[1], col[2]); gl.uniform1f(L.uAlpha, alpha); gl.uniform1f(L.uMat, mat); gl.uniform1f(L.uScale, scale);
+  }
+  drawSimple(g, model, col, alpha, mat) { const gl = this.gl; this.setU(model, col, alpha, mat, 1); gl.bindVertexArray(g.vao); gl.drawElements(gl.TRIANGLES, g.n, g.type, 0); }
+  draw(flies, world, focus, tFly, trails, fx) {
+    const gl = this.gl, cam = this.cam;
+    gl.viewport(0, 0, this.W, this.H); gl.clearColor(FOG[0] / 255, FOG[1] / 255, FOG[2] / 255, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const target = focus ? [focus.x, focus.y, focus.z + 0.6] : [0, 0, 6];
+    const yaw = cam.yaw + cam.dyaw + (focus && cam.mode < 2 ? focus.yaw : 0);
+    const eye = [target[0] + cam.dist * Math.cos(cam.pitch) * Math.cos(yaw), target[1] + cam.dist * Math.cos(cam.pitch) * Math.sin(yaw), target[2] + cam.dist * Math.sin(cam.pitch)];
+    { const pp = world.perch, pr = (world.perch_r || 9) + 0.8, ph = (world.perch_top || 12) + 0.8;  // lift the camera until the post no longer hides the fly
+      const blocked = () => { for (let k = 1; k < 16; k++) { const f = k / 16, x = eye[0] + (target[0] - eye[0]) * f, y = eye[1] + (target[1] - eye[1]) * f, z = eye[2] + (target[2] - eye[2]) * f;
+        if (z < ph && Math.hypot(x - pp[0], y - pp[1]) < pr) return true; } return false; };
+      for (let k = 0; k < 24 && blocked(); k++) eye[2] += 1.5; }
+    const VP = mul(persp(0.75, this.W / this.H, Math.max(0.05, cam.dist * 0.01), 2000), lookAt(eye, target));
+    this.VP = VP;
+    gl.useProgram(this.p);
+    const L = this.loc, AR = world.arena || 60, PR = world.perch_r || 9, DR = world.drop_r || 3.5, P = world.perch, top = world.perch_top;
+    gl.uniformMatrix4fv(L.uVP, false, new Float32Array(VP)); gl.uniform3f(L.uCam, eye[0], eye[1], eye[2]); gl.uniform1f(L.uTime, fx.time); gl.uniform1f(L.uGlow, 0); gl.uniform1f(L.uGround, 0);
+    const dEye = Math.hypot(eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]);
+    gl.uniform4f(L.uSpot, target[0], target[1], focus ? Math.max(18, dEye * 2.2) : AR * 0.95, 0);  // the lamp follows what the camera looks at
+    gl.uniform2f(L.uFog, dEye * 1.6 + 6, dEye * 5 + 24);
+    gl.uniform4fv(L.uOcc, new Float32Array([world.sugar[0], world.sugar[1], DR, 1.6, world.bitter[0], world.bitter[1], DR, 1.6, P[0], P[1], PR, top]));
+    gl.enable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+    // floor, perch, drops (opaque)
+    this.drawSimple(this.quad, scale3(AR + 2, AR + 2, 1), [1, 1, 1], 1, 8);
+    this.drawSimple(this.cyl, mul(trans(P[0], P[1], 0), scale3(PR, PR, top)), [0.42, 0.29, 0.18], 1, 12);
+    // flies
+    const translucent = [], groundOf = (f) => Math.hypot(f.x - P[0], f.y - P[1]) < PR && f.z >= top - 0.2 ? top : 0;
+    for (const f of flies) {
+      gl.uniform1f(L.uGround, groundOf(f));
+      const root = mul(trans(f.x, f.y, f.z + 0.95), mul(rotZ(f.yaw), mul(rotY(f.air ? -0.12 : 0), scale3(10, 10, 10))));
+      const M = this.fk(root, f.q);
+      for (const pt of this.parts) {
+        const model = M[pt.body];
+        if (pt.mat === 7) { translucent.push([model, pt]); continue; }
+        const col = pt.mat === 0 || pt.mat === 6 ? pt.col.map((v, i) => v * (f.tint ? f.tint[i] : 1)) : pt.col;
+        this.setU(model, col, 1, pt.mat, this.span); gl.bindVertexArray(pt.vao); gl.drawElements(gl.TRIANGLES, pt.n, gl.UNSIGNED_INT, 0);
+      }
+      if (f.air && f.ghosts) for (const [gq, ga] of f.ghosts) {  // motion-blurred wing strokes
+        const Mg = this.fk(root, gq);
+        for (const pt of this.parts) if ((pt.body === f.wingL || pt.body === f.wingR)) translucent.push([Mg[pt.body], pt, ga]);
+      }
+    }
+    // translucent: shadows, wings, drops, walls, trails
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    gl.uniform1f(L.uGround, 0);
+    for (const f of flies) {
+      const ground = groundOf(f), h = Math.max(0, f.z - ground);
+      this.drawSimple(this.quad, mul(trans(f.x, f.y, ground + 0.02), mul(rotZ(f.yaw), scale3(1.9 + h * 0.05, 1.1 + h * 0.05, 1))), [0, 0, 0], Math.max(0.12, 0.55 - h * 0.012), 13);
+    }
+    for (const [model, pt, ga] of translucent) { this.setU(model, pt.col, ga ?? 1, 7, this.span); gl.bindVertexArray(pt.vao); gl.drawElements(gl.TRIANGLES, pt.n, gl.UNSIGNED_INT, 0); }
+    const goal = fx.goal === "perch" ? [P[0], P[1], top + 0.06, PR * 1.25] : [world.sugar[0], world.sugar[1], 0.05, DR * 1.6];
+    gl.uniform1f(L.uGlow, fx.motion ? 0.6 : 0);
+    this.drawSimple(this.quad, mul(trans(goal[0], goal[1], goal[2]), scale3(goal[3], goal[3], 1)), LIGHT ? [0.24, 0.26, 0.3] : [0.93, 0.91, 0.86], 0.75, 14);
+    gl.uniform1f(L.uGlow, fx.sweet);
+    this.drawSimple(this.sphere, mul(trans(world.sugar[0], world.sugar[1], 0), scale3(DR, DR, 1.6)), [0.92, 0.70, 0.32], 0.85, 10);
+    gl.uniform1f(L.uGlow, 0);
+    this.drawSimple(this.sphere, mul(trans(world.bitter[0], world.bitter[1], 0), scale3(DR, DR, 1.6)), [0.44, 0.36, 0.66], 0.9, 11);
+    for (const [x, y, rz] of [[0, -AR, 0], [0, AR, Math.PI], [-AR, 0, -Math.PI / 2], [AR, 0, Math.PI / 2]])
+      this.drawSimple(this.quad, mul(trans(x, y, AR / 2), mul(rotZ(rz), mul(rotX(Math.PI / 2), scale3(AR, AR / 2, 1)))), [0.7, 0.85, 0.95], 1, 9);
+    gl.useProgram(this.pl); gl.uniformMatrix4fv(this.lloc.uVP, false, new Float32Array(VP));
+    gl.bindVertexArray(this.trailVAO);
+    for (const tr of trails) {
+      if (tr.pts.length < 6) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf); gl.bufferData(gl.ARRAY_BUFFER, tr.pts, gl.DYNAMIC_DRAW);
+      gl.uniform1f(this.lloc.uN, tr.pts.length / 3); gl.uniform4f(this.lloc.uC, tr.col[0], tr.col[1], tr.col[2], 0.6);
+      gl.drawArrays(gl.LINE_STRIP, 0, tr.pts.length / 3);
+    }
+    gl.depthMask(true); gl.disable(gl.BLEND);
+    return VP;
+  }
+}
+
+// pose: joint angles from what the body is doing. The stepping rhythm is drawn (the LIF connectome makes
+// none); how far each leg steps follows its own motor neurons' share of the legs' activity when the
+// session carries the leg pools (st.legs), else the turn readout.
+const LEGS = [["T1", "left"], ["T2", "left"], ["T3", "left"], ["T1", "right"], ["T2", "right"], ["T3", "right"]];
+const stepDrive = (st) => Math.max(st.fwd, st.back, 0.8 * Math.abs(st.turn));  // turning on the spot steps too
+function pose(st, phase, wphase, tReal) {
+  const q = {};
+  const drive = stepDrive(st), dir = st.fwd >= st.back ? 1 : -1;
+  const legs = st.legs, legMean = legs ? legs.reduce((a, b) => a + b, 0) / 6 : 0;
+  if (!st.air) {
+    for (const [seg, side] of LEGS) {
+      const inA = (seg === "T2") === (side === "right"), ph = phase + (inA ? 0 : Math.PI);
+      const k = { T1: 0, T2: 2, T3: 4 }[seg] + (side === "right" ? 1 : 0);
+      const sideAmp = legs && legMean > 0.5 ? Math.min(1.6, legs[k] / legMean) : (side === "left" ? 1 - st.turn : 1 + st.turn);
+      const amp = 0.32 * drive * Math.max(0, sideAmp), lift = Math.max(0, Math.sin(ph)) * drive * Math.min(1.2, Math.max(0.2, sideAmp));
+      const sign = seg === "T1" ? 1 : seg === "T2" ? 0.8 : 0.7;
+      q[`coxa_${seg}_${side}`] = dir * amp * Math.cos(ph) * sign;
+      q[`femur_${seg}_${side}`] = 0.42 * lift;
+      q[`tibia_${seg}_${side}`] = -0.35 * lift;
+      q[`tarsus_${seg}_${side}`] = 0.2 * lift;
+    }
+    if (st.groom > 0.05) {  // front legs up to the head, rubbing
+      const g = Math.min(1, st.groom);
+      for (const side of ["left", "right"]) {
+        const rub = reduced ? 0 : Math.sin(tReal * 9 + (side === "left" ? 0 : Math.PI));
+        q[`coxa_T1_${side}`] = (q[`coxa_T1_${side}`] || 0) * (1 - g) + g * (1.25 + 0.15 * rub);
+        q[`femur_T1_${side}`] = g * (1.5 + 0.2 * rub);
+        q[`tibia_T1_${side}`] = -g * (1.1 - 0.25 * rub);
+        q[`femur_twist_T1_${side}`] = g * 0.35 * rub;
+      }
+      q.antenna_left = q.antenna_right = 0.2 * g * Math.sin(tReal * 7);
+    }
+    q.wing_yaw_left = q.wing_yaw_right = 1.4;  // wings folded over the abdomen
+  } else {
+    for (const [seg, side] of LEGS) { q[`coxa_${seg}_${side}`] = seg === "T3" ? -0.2 : 0.5; q[`femur_${seg}_${side}`] = 1.4; q[`tibia_${seg}_${side}`] = -1.1; }
+    const s = Math.sin(wphase), c = Math.cos(wphase);
+    for (const side of ["left", "right"]) {
+      const bias = side === "left" ? -st.turn * 0.25 : st.turn * 0.25;
+      q[`wing_yaw_${side}`] = 0.1 + bias + (0.75 + 0.45 * st.power) * s;
+      q[`wing_pitch_${side}`] = 0.9 * c;
+      q[`wing_roll_${side}`] = 0.15 * Math.sin(2 * wphase);
+    }
+  }
+  const ext = Math.min(1, st.mn9 / 60);  // proboscis follows MN9
+  q.rostrum = -1.0 * ext; q.haustellum = 1.0 * ext;
+  q.abdomen = st.air ? -0.12 : 0;
+  return q;
+}
+// ---------- session timeline ---------------------------------------------------------------------
+let D, neu, Q, wins = [], bodies = [], timeline = [], total = 0, world = null, brainView = null, CNS_CENTER = null;
+let spikeArr, depArr, stateVersion = 0, cnsFly = 0, camFly = 0;
+const FLYCOL = [PAL.fly.map((x) => x / 255), PAL.motor.map((x) => x / 255)];  // each fly's trail
+S.simRate = 60;  // fly ms per second of playback
+function buildTimeline() {
+  timeline = []; trCache.clear(); let t = 0;
+  const many = D.windows.length > 60;  // a session of short reports (Qwen reads every 10 ms of fly time): brisk pacing
+  const flytime = new URLSearchParams(location.search).has("flytime");  // the fly's windows back to back, Qwen's reading time left out
+  S.gap = flytime ? 0 : many ? 0.05 : 0.4;
+  for (const s of D.segments) {
+    const dur = s.kind === "qwen" ? (flytime ? 0.02 : many ? 0.3 : Math.max(1.2, s.count / S.tokRate)) : s.kind === "user" ? 1.6
+      : D.windows[s.run].ms / S.simRate + (flytime ? 0 : many ? 0.05 : 0.8);
+    timeline.push({ ...s, id: timeline.length, t0: t, t1: t + dur, flyDur: s.kind === "fly" ? D.windows[s.run].ms / S.simRate : 0 }); t += dur + S.gap;
+  }
+  total = t;
+  $("track").innerHTML = "";
+  for (const s of timeline) trackNode(s);
+}
+function trackNode(s) {
+  const track = $("track"), d = document.createElement("div"); d.className = "seg " + ({ qwen: "q", user: "u" }[s.kind] || "f"); d.style.flex = String(s.t1 - s.t0 + S.gap);
+  const l = document.createElement("span"); l.textContent = { qwen: "Qwen", user: LIVE ? "You" : "User" }[s.kind] || "Fly"; d.title = { qwen: "Qwen reads its fly", user: LIVE ? "What you did" : "A user message" }[s.kind] || "The fly's layers run";
+  d.appendChild(l); track.appendChild(d); track.classList.toggle("dense", timeline.length > 120);
+}
+const viewStart = () => (timeline.length ? timeline[0].t0 : 0);  // live: the oldest window still kept
+const segAt = (T) => timeline.find((s) => T >= s.t0 && T < s.t1 + S.gap) || timeline[timeline.length - 1];
+function flyTimeAt(T) {  // fly time in ms (absolute), frozen while Qwen writes
+  let tf = 0;
+  for (const s of timeline) {
+    if (s.kind !== "fly") continue;
+    const w = D.windows[s.run], start = w.t0 / 10;
+    if (T < s.t0) break;
+    tf = start + Math.min(w.ms, (T - s.t0) / s.flyDur * w.ms);
+  }
+  return tf;
+}
+function describe(T) {
+  const s = segAt(T);
+  return s.kind === "fly" ? `Flies running, ${(flyTimeAt(T) - D.windows[s.run].t0 / 10).toFixed(0)} of ${D.windows[s.run].ms} ms` : "Qwen writing";
+}
+
+// transcript
+const tr = $("transcript"), trNodes = [], trCache = new Map(); let liveRun = "";
+function lastStarted(T) { let lo = 0, hi = timeline.length; while (lo < hi) { const m = (lo + hi) >> 1; if (timeline[m].t0 <= T) lo = m + 1; else hi = m; } return lo - 1; }
+function segMsg(i, T) {  // one transcript entry for timeline[i] at time T: {key, html, state, run}, or null while hidden
+  const s = timeline[i];
+  if (s.kind === "user") return { key: `${s.id}`, html: () => `<div class="msg user"><span class="who">${LIVE ? "You" : "User"}</span><div class="body">${esc(s.text)}</div></div>` };
+  if (s.kind === "qwen" && s.probs) {  // Qwen reads the report (the fly prints its senses); its answer sets the drive
+    const live = T < s.t1 + S.gap * 2;
+    return { key: `${s.id}:${live}`, state: live ? "reading" : "", html: () => {
+      const order = Object.entries(s.probs).sort((a, b) => b[1] - a[1]);
+      const bars = order.filter(([, q]) => q >= 0.01).map(([w, q], k) => `<span class="drv${k === 0 ? " top" : ""}"><span class="w">${esc(w)}</span><span class="tr"><span class="fill" style="transform:scaleX(${q.toFixed(3)})"></span></span><span class="q">${Math.round(q * 100)}%</span></span>`).join("");
+      const lv = s.levels;
+      const dn = lv ? `<div class="levels">Registers: ${[["P9", 0], ["DNa02 L", 1], ["DNa02 R", 2], ["giant fiber", 3], ["DNg02", 4], ["MDN", 5], ["aDN", 6]].filter(([, k]) => k < lv.length).map(([nm, k]) => `${nm} <b>${(+lv[k]).toFixed(1)}</b>`).join(" · ")}</div>` : "";
+      const rd = s.read.replace(/\nBest move.*$/s, ""), cut = rd.indexOf(" Its neurons:");
+      const senses = s.words ? `<div class="senses">The fly prints ${["taste", "proboscis", "antennae", "wings"].map((k, j) => `${k} <span class="said">${esc(String(s.words[j]).trim())}</span>`).join(" · ")}</div>` : "";
+      return `<div class="msg read${live ? " live" : ""}"><span class="who">Qwen reads its fly</span><div class="body">${esc(cut < 0 ? rd : rd.slice(0, cut))}</div>${senses}</div>`
+        + `<div class="msg qwen"><span class="who">Qwen's answer</span><div class="drive">${bars}</div>${dn}</div>`; } };
+  }
+  if (s.kind === "qwen") {
+    const k = Math.min(s.count, Math.floor((T - s.t0) * S.tokRate) + 1), live = T < s.t1;
+    return { key: `${s.id}:${k}:${live}`, state: live ? "writing" : "", html: () => {
+      const txt = D.tokens.slice(s.start, s.start + k).join("").replace(/<\|im_end\|>/g, "");
+      const c = txt.indexOf("<tool_call>");
+      let body = esc((c < 0 ? txt : txt.slice(0, c)).trim());
+      if (c >= 0) body += `<span class="call">${esc(txt.slice(c))}</span>`;
+      return `<div class="msg qwen"><span class="who">Qwen</span><div class="body">${body}${live ? '<span class="cursor" aria-hidden="true"></span>' : ""}</div></div>`; } };
+  }
+  const w = D.windows[s.run], done = T >= s.t1 - Math.min(0.4, S.gap * 2);
+  if (done && !s.summary) return null;
+  return { key: `${s.id}:${done}`, state: done ? "" : "muted on fly tokens", run: done ? "" : `Running · ${(flyTimeAt(T) - w.t0 / 10).toFixed(0)} of ${w.ms} ms`,
+           html: () => `<div class="msg fly"><span class="who">The fly's layers</span><div class="body">${done ? esc(s.summary) : '<span class="running" id="runline"></span>'}</div></div>` };
+}
+function renderTranscript(T) {  // the prompt and the latest 40 entries; one node each, rewritten only when it changes
+  liveRun = "";
+  let state = "";
+  if (!trCache.has("prompt")) {
+    const pv = D.prompt.split(/(?<=\.)\s/)[0];
+    trCache.set("prompt", `<div class="msg user"><span class="who">Qwen's instructions</span><div class="body">${esc(pv)}</div><details><summary>Show the full prompt</summary><div class="body full">${esc(D.prompt)}</div></details></div>`);
+  }
+  const msgs = [];
+  for (let i = lastStarted(T); i >= 0 && msgs.length < 40; i--) {  // newest first: the latest live entry sets the state
+    const e = segMsg(i, T);
+    if (!e) continue;
+    let h = trCache.get(e.key);
+    if (h === undefined) { h = e.html(); trCache.set(e.key, h); }
+    msgs.push(h);
+    state = state || e.state || "";
+    liveRun = liveRun || e.run || "";
+  }
+  msgs.push(trCache.get("prompt"));
+  msgs.reverse();
+  if (trCache.size > 4000) trCache.clear();  // keys of entries long scrolled away
+  const atEnd = tr.scrollHeight - tr.scrollTop - tr.clientHeight < 40; let changed = false;
+  while (trNodes.length > msgs.length) { trNodes.pop().remove(); changed = true; }
+  msgs.forEach((h, i) => {
+    let n = trNodes[i];
+    if (!n) { n = document.createElement("div"); tr.appendChild(n); trNodes.push(n); }
+    if (n._h !== h) { n.innerHTML = h; n._h = h; changed = true; }
+  });
+  if (changed && atEnd) tr.scrollTop = tr.scrollHeight;
+  if (liveRun) { const el = $("runline"); if (el) setText(el, liveRun); }
+  setText($("qstate"), state || "idle"); setAttr($("qstate"), "data-on", state === "reading" || state === "writing" ? "1" : "0");
+}
+
+// Qwen's neurons: a WebGL wall (one row per layer, 8 neurons per column) with a soft glow and a sweep per token.
+// One sequential map in Qwen's colour: from the well's dark through umber and copper to Qwen's amber, then cream.
+const HEAT = LIGHT ? [[0, PAL.stage], [0.22, [242, 230, 212]], [0.48, [232, 182, 112]], [0.74, PAL.qwen], [1, [150, 70, 6]]]  // paper, through tan, to Qwen's amber and a deep amber
+  : [[0, [13, 12, 12]], [0.22, [52, 30, 20]], [0.48, [138, 82, 40]], [0.74, PAL.qwen], [1, [252, 244, 226]]];
+const FS_WALL = `#version 300 es
+precision highp float; in vec2 vUV; uniform sampler2D uH; uniform float uSweep, uMuted; uniform vec2 uTex; out vec4 o;
+vec3 heat(float t) { t = clamp(t, 0.0, 1.0);
+${HEAT.slice(1).map(([t, c], k) => `  if (t <= ${t.toFixed(2)}) return mix(${v3(HEAT[k][1])}, ${v3(c)}, smoothstep(0.0, 1.0, (t - ${HEAT[k][0].toFixed(2)}) / ${(t - HEAT[k][0]).toFixed(2)}));`).join("\n")}
+  return ${v3(HEAT[HEAT.length - 1][1])}; }
+void main() {
+  vec2 uv = vec2(vUV.x, 1.0 - vUV.y);
+  float h = texture(uH, uv).r * 1.6, g = 0.0, wsum = 0.0;
+  for (int i = -6; i <= 6; i++) for (int j = -1; j <= 1; j++) { float w = (1.0 - abs(float(i)) / 7.0) * (j == 0 ? 1.0 : 0.35); g += texture(uH, uv + vec2(float(i) * 2.5 / uTex.x, float(j) / uTex.y)).r * 1.6 * w; wsum += w; }
+  g /= wsum;
+  float row = fract(uv.y * uTex.y), sep = smoothstep(0.0, 0.16, row) * smoothstep(1.0, 0.84, row);  // a hairline between layers
+  vec3 c = heat(max(sqrt(h) * 0.95, sqrt(g) * 0.7)) * (0.5 + 0.5 * sep) + heat(sqrt(g) * 1.1) * 0.22;
+  if (uv.y > 1.0 - 1.0 / uTex.y) c ${LIGHT ? "-= (1.0 - " + v3(PAL.qwen) + ")" : "+= " + v3(PAL.qwen)} * 0.05;  // layer 31: its output is the hidden state the fly reads
+  if (uSweep >= 0.0) { float d = uv.x - uSweep; c ${LIGHT ? "-= vec3(0.0, 0.1, 0.26)" : "+= vec3(1.0, 0.9, 0.72)"} * (exp(-d * d * 4000.0) * 0.22 + smoothstep(-0.2, 0.0, d) * step(d, 0.0) * 0.04); }
+  o = vec4(${LIGHT ? `mix(c, ${v3(PAL.stage)}, 0.58 * uMuted)` : "c * mix(1.0, 0.42, uMuted)"}, 1.0);  // muted: toward the well
+}`;
+class WallView {
+  constructor(canvas) {
+    this.c = canvas;
+    const gl = this.gl = canvas.getContext("webgl2", { antialias: false, premultipliedAlpha: false });
+    if (!gl) throw new Error("WebGL2 unavailable");
+    const sh = (t, src) => { const x = gl.createShader(t); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+    this.p = gl.createProgram(); gl.attachShader(this.p, sh(gl.VERTEX_SHADER, VS_QUAD)); gl.attachShader(this.p, sh(gl.FRAGMENT_SHADER, FS_WALL)); gl.linkProgram(this.p);
+    if (!gl.getProgramParameter(this.p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(this.p));
+    this.vao = gl.createVertexArray(); gl.bindVertexArray(this.vao);
+    const qb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, qb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    this.u8 = new Uint8Array(WC * 32);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, WC, 32, 0, gl.RED, gl.UNSIGNED_BYTE, this.u8);
+    this.loc = Object.fromEntries(["uH", "uSweep", "uMuted", "uTex"].map((n) => [n, gl.getUniformLocation(this.p, n)]));
+    this.resize();
+  }
+  resize() { const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.c.getBoundingClientRect(); this.c.width = Math.max(2, Math.round(r.width * dpr)); this.c.height = Math.max(2, Math.round(r.height * dpr)); }
+  draw(h, sweep, muted) {
+    const gl = this.gl, u = this.u8;
+    for (let i = 0; i < h.length; i++) u[i] = Math.min(255, h[i] / 1.6 * 255);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WC, 32, gl.RED, gl.UNSIGNED_BYTE, u);
+    gl.viewport(0, 0, this.c.width, this.c.height); gl.useProgram(this.p); gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0); gl.uniform1i(this.loc.uH, 0); gl.uniform1f(this.loc.uSweep, sweep); gl.uniform1f(this.loc.uMuted, muted ? 1 : 0); gl.uniform2f(this.loc.uTex, WC, 32);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+}
+const WC = 1152, heat = new Float32Array(32 * WC);
+const LUT = new Uint8ClampedArray(1024 * 3);  // the same colour map, for the 2D vote and history strips
+{ const st = HEAT;
+  for (let i = 0; i < 1024; i++) { const t = i / 1023; let k = 0; while (k < st.length - 2 && t > st[k + 1][0]) k++;
+    const [t0, c0] = st[k], [t1, c1] = st[k + 1], u = (t - t0) / (t1 - t0), f = u * u * (3 - 2 * u); for (let c = 0; c < 3; c++) LUT[i * 3 + c] = c0[c] + (c1[c] - c0[c]) * f; } }
+function amber(h, d, o) { const i = (Math.max(0, Math.min(1, h)) * 1023 | 0) * 3; d[o] = LUT[i]; d[o + 1] = LUT[i + 1]; d[o + 2] = LUT[i + 2]; d[o + 3] = 255; }
+let lastTok = -1, wallGL = null, sweepAt = -1e9, VOTES = null;
+function readVotes(vb) {  // header: layers, neurons, words (u32 each), scale (f32); then int8 votes
+  const dv = new DataView(vb), L = dv.getUint32(0, true), N = dv.getUint32(4, true), W = dv.getUint32(8, true) || 7;
+  return { L, N, W, q: new Int8Array(vb, 16) };
+}
+function voteOf(l, n, layer) {  // the move this neuron pushes hardest at this token: activation x its direct vote
+  if (!VOTES) return "";
+  const W = VOTES.W, k = layer.idx.indexOf(n), a = k >= 0 ? layer.sval[k] : 0, o = (l * VOTES.N + n) * W;
+  let best = -1, bv = 0;
+  for (let w = 0; w < W; w++) { const v = a * VOTES.q[o + w]; if (v > bv) { bv = v; best = w; } }
+  return best >= 0 ? D.votes.words[best] : "";
+}
+function drawVotes(tokIdx) {  // per layer, the summed direct votes of its recorded neurons on each move word
+  const c = $("votes"); if (!VOTES || !c || tokIdx < 0) return;
+  const W = VOTES.W, t = Q.toks[tokIdx], M = new Float32Array(Q.L * W); let mx = 1e-9;
+  for (let l = 0; l < Q.L; l++) { const { idx, sval } = t[l];
+    for (let k = 0; k < idx.length; k++) { const o = (l * VOTES.N + idx[k]) * W; for (let w = 0; w < W; w++) M[l * W + w] += sval[k] * VOTES.q[o + w]; } }
+  for (let i = 0; i < M.length; i++) mx = Math.max(mx, Math.abs(M[i]));
+  if (c.width !== W) { c.width = W; c.height = Q.L; $("vlab").style.setProperty("--n", W); }
+  const ctx = c.getContext("2d"), img = ctx.createImageData(W, Q.L);
+  for (let i = 0; i < M.length; i++) { const v = M[i] / mx, o = i * 4;
+    if (v >= 0) amber(Math.sqrt(v), img.data, o); else { const u = Math.sqrt(-v); for (let ch = 0; ch < 3; ch++) img.data[o + ch] = HEAT[0][1][ch] + (PAL.voteaway[ch] - HEAT[0][1][ch]) * u; img.data[o + 3] = 255; } }
+  ctx.putImageData(img, 0, 0);
+  const ans = String(D.tokens[tokIdx] || "").trim();
+  setHTML($("vlab"), D.votes.words.slice(0, W).map((w) => `<span class="${w === ans ? "on" : ""}" title="${w}">${w === "forward" ? "fwd" : w}</span>`).join(""));
+}
+function wallStep(tokIdx, muted, dt, now) {
+  const decay = Math.exp(-dt * (muted ? 2.2 : 5.5));
+  for (let i = 0; i < heat.length; i++) heat[i] *= decay;
+  if (!muted && tokIdx !== lastTok && tokIdx >= 0 && tokIdx < Q.nt) {
+    const t = Q.toks[tokIdx], top = [];
+    for (let l = 0; l < Q.L; l++) {
+      const { idx, val } = t[l], sc = Q.scale[l] || 1;
+      for (let k = 0; k < Q.K; k++) { const v = val[k] / sc, o = l * WC + (idx[k] >> 3); if (Math.min(1.6, v) > heat[o]) heat[o] = Math.min(1.6, v); if (k < 3) top.push([v, l, idx[k], val[k]]); }
+    }
+    top.sort((a, b) => b[0] - a[0]);
+    setHTML($("toplist"), top.slice(0, 6).map(([, l, i, v]) => { const vt = voteOf(l, i, t[l]); return `<span title="L${l}N${i}"><b>L${l}N${i}</b> ${v.toFixed(2)}${vt ? ` <i>→ ${vt}</i>` : ""}</span>`; }).join(""));
+    drawVotes(tokIdx);
+    lastTok = tokIdx; sweepAt = now;
+    setHTML($("wallcap"), `Last token of the report. Answer <span class="ans">${esc(String(D.tokens[tokIdx]).trim())}</span>`);
+  } else if (muted) setHTML($("wallcap"), '<span class="flag">Muted while the fly\'s layers run</span>');
+  const sw = reduced ? -1 : (now - sweepAt) / 380;
+  if (wallGL) wallGL.draw(heat, sw >= 0 && sw <= 1.15 ? sw : -1, muted);
+}
+const hist = $("hist"), hctx = hist.getContext("2d");
+let histCols = [], histImg = null;
+function buildHist() {
+  histCols = [];
+  for (const s of timeline) {
+    if (s.kind === "qwen") for (let t = 0; t < s.count; t++) histCols.push({ tok: s.start + t, seg: s });
+    else for (let g = 0; g < 8; g++) histCols.push({ fly: s.run, seg: s, g });
+  }
+  hist.width = Math.max(1, histCols.length); hist.height = 32; histImg = hctx.createImageData(hist.width, 32); histT = null; histX = -2;
+  histCols.forEach((c, x) => { for (let l = 0; l < 32; l++) { const o = (l * hist.width + x) * 4; if (c.fly !== undefined) { histImg.data[o] = PAL.flydim[0]; histImg.data[o + 1] = PAL.flydim[1]; histImg.data[o + 2] = PAL.flydim[2]; histImg.data[o + 3] = 255; } else amber(Q.energy[c.tok * Q.L + l] * 0.9, histImg.data, o); } });
+}
+let histT = null, histX = -2;
+function drawHist(T) {
+  if (!histT) histT = Float64Array.from(histCols, (c) => c.tok !== undefined ? c.seg.t0 + (c.tok - c.seg.start) / S.tokRate : c.seg.t0 + c.g / 8 * (c.seg.t1 - c.seg.t0));
+  let lo = 0, hi = histT.length; while (lo < hi) { const m = (lo + hi) >> 1; if (histT[m] <= T) lo = m + 1; else hi = m; }
+  const x = lo - 1; if (x === histX) return; histX = x;
+  hctx.putImageData(histImg, 0, 0);
+  hctx.fillStyle = rgba(PAL.stage, 0.6); hctx.fillRect(x + 1, 0, hist.width - x - 1, 32); hctx.fillStyle = rgba(PAL.text, 1); hctx.fillRect(Math.max(0, x), 0, 1, 32);
+}
+hist.addEventListener("click", (e) => { if (!histCols.length) return; const r = hist.getBoundingClientRect(), c = histCols[Math.max(0, Math.min(histCols.length - 1, Math.floor((e.clientX - r.left) / r.width * histCols.length)))]; T = c.tok !== undefined ? c.seg.t0 + (c.tok - c.seg.start) / S.tokRate : c.seg.t0 + c.g / 8 * (c.seg.t1 - c.seg.t0); lastTok = -1; if (LIVE) setFollow(false); });
+
+// CNS state of the selected fly
+let cnsKey = "", spkCursor = 0, depShown = null;
+const upperBound = (a, v) => { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= v) lo = m + 1; else hi = m; } return lo; };
+let grpSpk = [], grpSince = 0, cnsK = -1, cnsF = null;  // per followed group: the steps of its recent spikes, tracked since grpSince
+function clearCNS(from = 0) { spikeArr.fill(-1e9); depArr.fill(0); spkCursor = 0; depShown = null; stateVersion++; grpSpk = (D.groups || []).map(() => []); grpSince = from; }
+function grpRate(g, step, win = 100) {  // Hz per member over the last `win` steps (10 ms), or over what has been tracked
+  const a = grpSpk[g]; if (!a) return 0; let n = 0;
+  for (let i = a.length - 1; i >= 0 && a[i] > step - win; i--) n++;
+  const span = Math.max(20, Math.min(win, step - grpSince));
+  return n / Math.max(1, D.groups[g].idx.length) / (span * 1e-4);
+}
+function cnsTo(k, f, step) {  // step: absolute 0.1 ms step
+  const key = k + ":" + f, F = wins[k][f];
+  if (cnsKey !== key) {
+    if (cnsF && k === cnsK + 1) {  // the next window: recent spikes, flashes and group rates run on; this window's cursors restart
+      if (depShown !== null) for (let q = cnsF.starts[depShown]; q < cnsF.starts[depShown + 1]; q++) depArr[cnsF.gidx[q]] = 0;
+      spkCursor = 0; depShown = null; stateVersion++;
+    } else clearCNS(D.windows[k].t0);
+    cnsKey = key; cnsK = k; cnsF = F;
+  } else if (spkCursor > 0 && F.step[spkCursor - 1] > step) clearCNS(D.windows[k].t0);  // seeking back inside the window
+  const before = spkCursor;
+  while (spkCursor < F.step.length && F.step[spkCursor] <= step) {
+    const i = F.idx[spkCursor], g = neu.grp[i];
+    spikeArr[i] = F.step[spkCursor] / 10;
+    if (g) { const a = grpSpk[g - 1]; a.push(F.step[spkCursor]); if (a.length > 4000) a.splice(0, 2000); }
+    spkCursor++;
+  }
+  if (spkCursor !== before) stateVersion++;
+  const fi = Math.max(0, upperBound(F.mstep, step) - 1);
+  if (F.mstep.length && (depShown === null || depShown !== fi)) {
+    if (depShown !== null) for (let q = F.starts[depShown]; q < F.starts[depShown + 1]; q++) depArr[F.gidx[q]] = 0;
+    for (let q = F.starts[fi]; q < F.starts[fi + 1]; q++) depArr[F.gidx[q]] = F.glev[q] / 255;
+    depShown = fi; stateVersion++;
+  }
+}
+
+// raster
+const rc = $("raster"), rctx = rc.getContext("2d"); let rasterKey = "", rasterRows = null, rasterDrawn = 0;
+const RASTER = { command: rgba(PAL.qwen, 0.95), sense: rgba(PAL.sense, 0.95), motor: rgba(PAL.motor, 0.95), pool: rgba(PAL.pool, 0.9), other: rgba(PAL.fly, 0.5) };
+function rasterTo(k, f, step) {
+  const key = k + ":" + f, F = wins[k][f], w = D.windows[k];
+  if (rasterKey !== key || (rasterDrawn > 0 && F.step[rasterDrawn - 1] > step)) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1); rc.width = Math.max(2, rc.clientWidth * dpr | 0); rc.height = Math.max(2, rc.clientHeight * dpr | 0);
+    rctx.fillStyle = rgba(PAL.stage, 1); rctx.fillRect(0, 0, rc.width, rc.height);
+    const first = new Map(); for (let i = 0; i < F.idx.length; i++) if (!first.has(F.idx[i])) first.set(F.idx[i], first.size);
+    rasterRows = first; rasterDrawn = 0; rasterKey = key;
+    setText($("rasterlbl"), `Spike raster · ${first.size.toLocaleString()} neurons`);
+  }
+  const W = rc.width, H = rc.height, n = Math.max(1, rasterRows.size), t0 = w.t0, span = w.ms * 10;
+  while (rasterDrawn < F.step.length && F.step[rasterDrawn] <= step) {
+    const i = F.idx[rasterDrawn], row = rasterRows.get(i), g = neu.grp[i];
+    const kind = g ? D.groups[g - 1].kind : "";
+    rctx.globalCompositeOperation = LIGHT ? "source-over" : "lighter";
+    rctx.fillStyle = RASTER[kind] || RASTER.other;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), sz = (g ? 2.5 : 1.5) * dpr;
+    rctx.fillRect((F.step[rasterDrawn] - t0) / span * W, (row + 0.5) / n * (H - 4) + 2, sz, Math.max(1, sz * 0.8)); rasterDrawn++;
+    rctx.globalCompositeOperation = "source-over";
+  }
+}
+
+// token stream (selected fly's tokens, or Qwen's)
+function renderStream(seg, T) {
+  const items = [];
+  if (seg.kind === "fly") {
+    const F = wins[seg.run][cnsFly], step = Math.floor(flyTimeAt(T) * 10);
+    let j = upperBound(F.step, step) - 1, st = step;
+    while (items.length < 46 && st >= Math.max(0, step - 400)) {
+      while (j >= 0 && F.step[j] === st) { items.push({ t: "spk", i: F.idx[j] }); j--; }
+      items.push({ t: "tick", s: st }); st--;
+    }
+    items.reverse();
+  } else {
+    const k = Math.min(seg.count, Math.floor((T - seg.t0) * S.tokRate) + 1);
+    if (seg.words) for (const w of seg.words) items.push({ t: "say", s: w });  // the fly's printed words, then Qwen's answer
+    for (let t = Math.max(0, k - 30); t < k; t++) items.push({ t: "q", s: D.tokens[seg.start + t] });
+  }
+  let html = "";
+  for (const it of items) {
+    if (it.t === "tick") html += `<span class="tk tick">TICK<sub>${it.s % 23}</sub></span>`;
+    else if (it.t === "spk") html += `<span class="tk spk${D.roles.MN9.includes(it.i) ? " hot" : ""}">spk ${esc(D.labels[it.i] || "#" + it.i)}</span>`;
+    else if (it.t === "say") html += `<span class="tk say">${esc(it.s)}</span>`;
+    else html += `<span class="tk q">${esc(JSON.stringify(it.s).slice(1, -1))}</span>`;
+  }
+  setHTML($("stream"), html);
+}
+
+// bodies: sample the per-ms logs
+function bodyAt(f, tms) {
+  const B = bodies[f], n = B.length / BC; if (!n) return null;
+  const t0 = B[0]; let i = Math.round(tms - t0); i = Math.max(0, Math.min(n - 1, i));
+  const r = (c) => B[i * BC + c];
+  return { t: r(0), x: r(1), y: r(2), z: r(3), yaw: r(4), air: r(5) > 0.5, fwd: r(6), back: r(7), turn: r(8), power: r(9), mn9: r(10), groom: Math.min(1, r(11)),
+           legs: BC >= 18 ? [r(12), r(13), r(14), r(15), r(16), r(17)] : null };  // each leg's motor neurons, Hz per member (fL fR mL mR hL hR)
+}
+function trailOf(f, tms) {
+  const B = bodies[f], n = B.length / BC, out = [];
+  const end = Math.max(0, Math.min(n - 1, Math.round(tms - B[0])));
+  for (let i = Math.max(0, end - 3000); i <= end; i += 4) out.push(B[i * BC + 1], B[i * BC + 2], B[i * BC + 3] + 0.05);
+  return new Float32Array(out);
+}
+function doing(st) {
+  if (!st) return "";
+  const o = [];
+  if (st.air) o.push(st.power >= 0.42 ? "flying" : "airborne, too little wing power to stay up");
+  else {
+    if (st.mn9 > 15) o.push("proboscis out, feeding");
+    if (st.groom > 0.35) o.push("grooming");
+    if (st.back > 0.3 && st.back >= st.fwd) o.push("walking backward"); else if (st.fwd > 0.3) o.push("walking forward");
+    if (Math.abs(st.turn) > 0.25) o.push(st.turn > 0 ? "turning left" : "turning right");
+  }
+  return o.length ? o.join(", ") : (st.z > 1 ? "standing on the perch" : "standing");
+}
+// the bridge: Qwen's answer -> registers -> descending neurons -> the body; the fly's senses -> printed words -> Qwen
+const CMD = [  // answer word, its register's neurons (export group name, label), what the body reads (group name, label)
+  ["forward", "P9 (DNp09)", "P9", "forward pool", "forward pool"], ["left", "DNa02 left", "DNa02 left", "left-turn pool", "left pool"],
+  ["right", "DNa02 right", "DNa02 right", "right-turn pool", "right pool"], ["jump", "giant fiber DNp01", "giant fiber", "jump motor neurons TTMn", "jump motor"],
+  ["fly", "DNg02 (wing power)", "DNg02", "flight motor neurons", "flight motor"], ["back", "MDN (moonwalker)", "MDN", "backward pool", "backward pool"],
+  ["groom", "aDN (antennal grooming)", "aDN", "grooming pool", "grooming pool"]];
+const SENSE = [  // printed slot, its neurons (export group names), label, its words (the last is the default)
+  ["taste", ["sugar taste neurons", "bitter taste neurons"], "taste neurons", ["sweet", "bitter", "nothing"]], ["proboscis", ["MN9 (proboscis)"], "MN9", ["extended", "folded"]],
+  ["antennae", ["Johnston's organ C/E"], "Johnston's organ", ["touching", "free"]], ["wings", ["flight motor neurons"], "flight motor neurons", ["beating", "still"]]];
+const gIndex = (name) => (D.groups || []).findIndex((g) => g.name === name);
+const cellH = (kind, id, name) => `<div class="cell ${kind}" id="${id}"><span class="nm">${esc(name)}</span><span class="val" id="${id}v"></span><span class="meter"><i id="${id}m"></i></span></div>`;
+let flowRows = [], flowGeom = null, flowPhase = 0, bridgeVals = null;
+function buildBridge() {
+  let h = `<canvas id="flow" aria-hidden="true"></canvas><div class="hd q">Answer</div><div class="hd q">Level</div><div class="hd f">Neurons</div><div class="hd m">Body</div>`;
+  CMD.forEach(([w, , dnL, , bodyL], r) => {
+    h += cellH("q", `a${r}`, w) + `<div class="cell q reg" id="r${r}"><span class="val" id="r${r}v"></span><span class="meter"><i id="r${r}m"></i></span></div>`
+      + cellH("f", `d${r}`, dnL) + cellH(r < 3 ? "p" : "m", `b${r}`, bodyL);
+  });
+  h += `<div class="mute" id="nodrive"></div><div class="gap"></div>`;
+  h += `<div class="hd s" style="grid-column: span 2">Senses</div><div class="hd f">Printed</div><div class="hd q">Qwen</div>`;
+  SENSE.forEach(([slot, , label], r) => {  // the neurons' label spans two columns, their rate inside it
+    h += cellH("s span2", `s${r}`, label) + `<div class="cell" id="w${r}"><span class="word" id="w${r}t">…</span></div><div class="cell q" id="k${r}"><span class="nm">${slot}</span></div>`;
+  });
+  $("bridge").innerHTML = h;
+  flowRows = [...CMD.map((_, r) => [`a${r}`, `r${r}`, `d${r}`, `b${r}`]), ...SENSE.map((_, r) => [`s${r}`, `w${r}`, `k${r}`])];
+  flowGeom = null;
+}
+function measureFlow() {
+  const host = $("bridge"), base = host.getBoundingClientRect(), fl = $("flow"), dpr = Math.min(2, window.devicePixelRatio || 1);
+  fl.width = Math.max(2, base.width * dpr | 0); fl.height = Math.max(2, host.scrollHeight * dpr | 0); fl.style.height = host.scrollHeight + "px";
+  flowGeom = { dpr, rows: flowRows.map((ids) => ids.map((id) => { const r = $(id).getBoundingClientRect(); return [r.left - base.left, r.right - base.left, (r.top + r.bottom) / 2 - base.top]; })) };
+}
+function setCell(id, frac, txt) { const m = $(id + "m"); if (m) m.style.transform = `scaleX(${Math.max(0, Math.min(1, frac)).toFixed(3)})`; const v = $(id + "v"); if (v) setText(v, txt); }
+function drawBridge(qseg, st, step, dt) {
+  if (!D.groups) return;
+  const probs = (qseg && qseg.probs) || {}, lv = (qseg && qseg.levels) || CMD.map(() => 0), words = (qseg && qseg.words) || null;
+  const top = Object.entries(probs).sort((a, b) => b[1] - a[1])[0];
+  const V = { rows: [] };
+  CMD.forEach(([w, dn, , body], r) => {
+    const p = probs[w] ?? 0, L = +lv[r] || 0, gi = gIndex(dn), rate = gi >= 0 ? grpRate(gi, step) : 0;
+    setCell(`a${r}`, p, probs[w] == null ? "–" : `${Math.round(p * 100)}%`);
+    $(`a${r}`).classList.toggle("win", !!top && top[0] === w);
+    setCell(`r${r}`, L / 15, `${L.toFixed(1)}`);
+    setCell(`d${r}`, rate / 200, `${rate.toFixed(0)} Hz`);
+    let bv = 0, bt = "";
+    if (st) {
+      if (r === 0) { bv = st.fwd; bt = `walk ${Math.round(st.fwd * 100)}%`; }
+      else if (r === 1) { bv = Math.max(0, st.turn); bt = `turn ${Math.round(bv * 100)}%`; }
+      else if (r === 2) { bv = Math.max(0, -st.turn); bt = `turn ${Math.round(bv * 100)}%`; }
+      else if (r === 3) { const gt = gIndex(body), tr = gt >= 0 ? grpRate(gt, step, 250) : 0; bv = st.air ? 1 : Math.min(1, tr / 15); bt = st.air ? "airborne" : `${tr.toFixed(0)} Hz`; }
+      else if (r === 4) { bv = st.power; bt = `power ${Math.round(st.power * 100)}%`; }
+      else if (r === 5) { bv = st.back; bt = `back ${Math.round(st.back * 100)}%`; }
+      else { bv = st.groom; bt = `groom ${Math.round(st.groom * 100)}%`; }
+    }
+    setCell(`b${r}`, bv, bt);
+    V.rows.push([p, L / 15, Math.min(1, rate / 150), bv]);
+  });
+  const ps = probs.stop ?? null;
+  setHTML($("nodrive"), ps == null ? "stop has no register" : `stop ${Math.round(ps * 100)}% · no register`);
+  SENSE.forEach(([slot, groups, , ws], r) => {
+    let rate = 0;
+    for (const g of groups) { const gi = gIndex(g), x = gi >= 0 ? grpRate(gi, step, 300) : 0; if (x > rate) rate = x; }
+    setCell(`s${r}`, rate / 150, `${rate.toFixed(0)} Hz`);
+    const w = words ? String(words[r]).trim() : null, el = $(`w${r}t`);
+    setText(el, w || "—"); el.classList.toggle("lit", !!w && w !== ws[ws.length - 1]);
+    V.rows.push([w && w !== ws[ws.length - 1] ? Math.max(0.35, Math.min(1, rate / 150)) : 0.15, w ? 0.6 : 0]);
+  });
+  bridgeVals = V;
+  drawFlow(dt);
+  if (st) {  // each leg's motor neurons (front, middle, hind; left then right), on a 0..20 Hz scale
+    const legs = st.legs ? `<span class="legs" role="img" aria-label="Leg motor neurons, Hz per member: ${["front left", "front right", "middle left", "middle right", "hind left", "hind right"].map((n, k) => `${n} ${st.legs[k].toFixed(1)}`).join(", ")}" title="Leg motor neurons (Hz): ${st.legs.map((v) => v.toFixed(1)).join(" · ")}">${st.legs.map((v) => `<i style="height:${Math.max(1, Math.min(16, 16 * v / LEG_HZ)).toFixed(0)}px"></i>`).join("")}</span>` : "";
+    setHTML($("doing"), `<b>${esc(doing(st).replace(/^./, (c) => c.toUpperCase()))}</b><span>at (${st.x.toFixed(0)}, ${st.y.toFixed(0)}, ${st.z.toFixed(0)}) mm</span>${legs}`);
+  }
+}
+function drawFlow(dt) {
+  const fl = $("flow"); if (!fl) return;
+  if (!flowGeom) measureFlow();
+  const ctx = fl.getContext("2d"), { dpr, rows } = flowGeom;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, fl.width, fl.height);
+  ctx.globalCompositeOperation = LIGHT ? "source-over" : "lighter";
+  flowPhase += reduced ? 0 : dt * 0.9;
+  const colQ = PAL.qwen, colF = PAL.fly, colM = PAL.motor, colS = PAL.sense;
+  rows.forEach((cells, r) => {
+    const v = bridgeVals.rows[r], sense = r >= CMD.length;
+    const cols = sense ? [colS, colF, colQ] : [colQ, colQ, colF, r < 3 ? PAL.pool : colM];
+    for (let k = 0; k < cells.length - 1; k++) {
+      const x0 = cells[k][1] + 4, x1 = cells[k + 1][0] - 4, y = cells[k][2], I = Math.max(0, Math.min(1, v[k]));
+      if (x1 - x0 < 6) continue;
+      const g = ctx.createLinearGradient(x0, 0, x1, 0), a = cols[k], b2 = cols[k + 1];
+      g.addColorStop(0, rgba(a, 0.08 + 0.32 * I)); g.addColorStop(1, rgba(b2, 0.08 + 0.32 * I));
+      ctx.strokeStyle = g; ctx.lineWidth = 1 + I; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      if (reduced || I < 0.02) continue;
+      const n = 1 + Math.round(2 * I);  // sparks travel the link, faster and denser with what it carries
+      for (let q = 0; q < n; q++) {
+        const f = (flowPhase * (0.7 + 1.1 * I) + q / n + r * 0.13) % 1, x = x0 + (x1 - x0) * f, c = f < 0.5 ? a : b2;
+        const gr = ctx.createRadialGradient(x, y, 0, x, y, 3.5);
+        gr.addColorStop(0, LIGHT ? rgba(c, 0.95 * I) : `rgba(255,255,255,${0.7 * I})`); gr.addColorStop(0.3, rgba(c, 0.6 * I)); gr.addColorStop(1, rgba(c, 0));
+        ctx.fillStyle = gr; ctx.fillRect(x - 4, y - 4, 8, 8);
+      }
+    }
+  });
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// world labels
+const wl = $("wlabels"); let wlab = null;
+function worldLabels(VP, sts) {
+  if (!wlab) { wlab = ["sugar drop", "bitter drop", "perch", ...D.flies.map((_, f) => D.flies.length > 1 ? "fly " + "AB"[f] : "the fly")].map((t, i) => { const el = document.createElement("div"); el.className = "lab on " + ["sugar", "bitter", "perch", "flyA", "flyB"][i]; el.textContent = t; wl.appendChild(el); return el; }); }
+  const r = world.c.getBoundingClientRect(), W = D.world;
+  const pts = [[W.sugar[0], W.sugar[1], 2.5], [W.bitter[0], W.bitter[1], 2.5], [W.perch[0], W.perch[1], W.perch_top + 1], ...sts.map((s) => s ? [s.x, s.y, s.z + 2.6] : [0, 0, -999])];
+  pts.forEach(([x, y, z], i) => {
+    const cx = VP[0] * x + VP[4] * y + VP[8] * z + VP[12], cy = VP[1] * x + VP[5] * y + VP[9] * z + VP[13], cw = VP[3] * x + VP[7] * y + VP[11] * z + VP[15];
+    const vis = cw > 0 && Math.abs(cx / cw) < 1.1 && Math.abs(cy / cw) < 1.1;
+    wlab[i].style.display = vis ? "" : "none";
+    if (vis) { wlab[i].style.left = ((cx / cw * 0.5 + 0.5) * r.width) + "px"; wlab[i].style.top = ((1 - (cy / cw * 0.5 + 0.5)) * r.height) + "px"; }
+  });
+}
+
+// ---------- main loop ---------------------------------------------------------------------------------
+let qIdx = [], fIdx = [];  // timeline positions of Qwen's reads and of fly windows
+function lastFly(T) { let lo = 0, hi = fIdx.length; while (lo < hi) { const m = (lo + hi) >> 1; if (timeline[fIdx[m]].t1 <= T) lo = m + 1; else hi = m; } return lo ? timeline[fIdx[lo - 1]] : null; }
+function lastQwen(T) { let lo = 0, hi = qIdx.length; while (lo < hi) { const m = (lo + hi) >> 1; if (timeline[qIdx[m]].t0 <= T) lo = m + 1; else hi = m; } return lo ? timeline[qIdx[lo - 1]] : null; }
+const LV = new Float32Array(32);
+let KINDS = [0, 0, 0];  // the last group id of each kind, in export order: commands, senses, motor (then pools)
+function haloLevels(qseg, step) {  // each followed group's halo: its register level (Qwen-driven groups) or its rate
+  LV.fill(0);
+  (D.groups || []).forEach((g, k) => {
+    const c = CMD.findIndex((x) => x[1] === g.name);  // a Qwen-driven group: its halo follows its register
+    LV[k + 1] = c >= 0 ? Math.min(1, ((qseg && qseg.levels && +qseg.levels[c]) || 0) / 15)
+      : Math.min(1, grpRate(k, step, 200) / ({ sense: 120, motor: 60, pool: 40 }[g.kind] || 60));
+  });
+  return LV;
+}
+let lastAnn = { kind: "", t: -1e9 };
+let clock = 0, T = 0, last = performance.now(), lastSeg = null, lastAria = 0, scrubW = 1, gait = [0, 0], wing = [0, 0], prevTf = 0;
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!timeline.length) { waitFrame(now); requestAnimationFrame(frame); return; }
+  if (S.playing) {
+    clock += dt * S.speed;
+    if (LIVE && follow) {  // hold about one window behind the live edge, speeding up or slowing down to stay there
+      const lag = total - T, aim = 1.5 * spanEMA + 0.25;
+      if (lag > aim + 8 * spanEMA + 3) { T = total - aim; lastTok = -1; prevTf = flyTimeAt(T); }  // joined late or the tab slept: jump near live
+      else T = Math.min(total - 1e-3, T + dt * Math.max(0.6, Math.min(3, 1 + (lag - aim) / (2 * aim))));
+    } else {
+      T += dt * S.speed;
+      if (T >= total) { if (LIVE) { T = total - 1e-3; setFollow(true); } else { T = 0; prevTf = 0; } }
+    }
+  }
+  if (LIVE && T < viewStart()) T = viewStart();
+  const seg = segAt(T);
+  if (seg !== lastSeg) {  // phase changes only, at most every 5 s (a dense session alternates three times a second)
+    const kind = seg.kind === "fly" ? "Fly running." : seg.kind === "user" ? "A user message." : seg.read ? "Qwen reads its fly." : "Qwen is writing.";
+    if (kind !== lastAnn.kind && now - lastAnn.t > 5000) { $("announce").textContent = kind; lastAnn = { kind, t: now }; }
+    lastSeg = seg;
+  }
+  const tf = flyTimeAt(T), dtf = Math.max(0, tf - prevTf) / 1000; prevTf = tf;
+  const sts = D.flies.map((_, f) => bodyAt(f, tf));
+  // body poses
+  const flies = sts.map((st, f) => {
+    if (!st) return null;
+    gait[f] += dtf * 2 * Math.PI * 11 * stepDrive(st);  // stepping keeps pace with the body (sim time)
+    wing[f] += (reduced || !S.playing ? 0 : 1) * (st.air ? dt * S.speed * 2 * Math.PI * 9 : 0);  // wingbeat, slowed for the eye
+    const q = pose(st, gait[f], wing[f], clock);
+    const ghosts = st.air ? [1, 2, 3].map((g) => [pose(st, gait[f], wing[f] - g * 0.45, clock), 0.32 - g * 0.08]) : null;
+    return { ...st, q, ghosts, wingL: 9, wingR: 10, tint: f ? [1.05, 0.92, 0.92] : null };
+  }).filter(Boolean);
+  const focus = world ? (world.cam.mode === 2 ? null : sts[world.cam.mode]) : null;
+  const trails = D.flies.map((_, f) => ({ pts: trailOf(f, tf), col: FLYCOL[f] }));
+  let qseg = seg.kind === "qwen" ? seg : lastQwen(T);
+  if (LIVE) { const fs = seg.kind === "fly" ? seg : lastFly(T); if (fs && fs.driver === "you" && (!qseg || fs.t0 > qseg.t0)) qseg = { levels: fs.levels || [], probs: null, words: null, read: "" }; }
+  const step = Math.floor(tf * 10), gs = gIndex("sugar taste neurons");
+  const fx = { time: now / 1000, motion: reduced ? 0 : 1, goal: qseg && /first goal/.test(qseg.read || "") ? "perch" : "sugar",
+               sweet: gs >= 0 ? Math.min(1, grpRate(gs, step, 300) / 120) : 0 };
+  if (world) worldLabels(world.draw(flies, D.world, focus, tf, trails, fx), sts);
+  const ans = qseg && qseg.probs ? Object.entries(qseg.probs).sort((a, b) => b[1] - a[1])[0] : null;
+  setHTML($("whud"), seg.kind === "fly" ? `<div class="big">Fly running</div><span class="v">${tf.toFixed(1)}</span> ms · window ${seg.run + 1}${LIVE ? "" : "/" + D.windows.length}${ans ? ` · answer <span class="q">${esc(ans[0])}</span>` : seg.driver === "you" ? " · you drive" : ""}<br>${D.windows[seg.run].forwards.toLocaleString()} forwards · ${LIVE ? D.windows[seg.run].wall.toFixed(2) : D.windows[seg.run].wall.toFixed(0)} s on the GPU`
+    : seg.read ? `<div class="big">Qwen reads its fly</div>fly time paused at <span class="v">${tf.toFixed(1)}</span> ms`
+    : `<div class="big">Qwen is writing</div>fly time paused at ${tf.toFixed(1)} ms`);
+  // CNS of the selected fly
+  const prev = seg.kind === "fly" ? seg : lastFly(T);
+  if (prev) {
+    const k = prev.run, step = Math.floor(tf * 10);
+    cnsTo(k, cnsFly, step); rasterTo(k, cnsFly, step);
+    const arcs = brainView && brainView.arcSpec ? brainView.arcSpec.map((a) => { const L = ((qseg && qseg.levels && +qseg.levels[a.row]) || 0) / 15, gi = gIndex(CMD[a.row][1]);
+      return L * (0.35 + 0.65 * Math.min(1, (gi >= 0 ? grpRate(gi, step) : 0) / 120)); }) : null;
+    if (brainView) brainView.draw(tf + (seg.kind === "fly" ? 0 : 400 * (T - prev.t1)), spikeArr, depArr, null, { lv: haloLevels(qseg, step), kinds: KINDS, time: now / 1000, motion: reduced ? 0 : 1, arcs });
+    setHTML($("hud"), `<span class="v">${spkCursor.toLocaleString()}</span> spikes this window`);
+  } else {  // before the first window: nothing has spiked yet
+    if (cnsKey) { clearCNS(); cnsKey = ""; cnsK = -1; cnsF = null; rasterKey = ""; const rx = rc.getContext("2d"); rx.clearRect(0, 0, rc.width, rc.height); }
+    setHTML($("hud"), `No window has run yet`);
+    if (brainView) brainView.draw(0, spikeArr, depArr, null, { lv: haloLevels(qseg, 0), kinds: KINDS, time: now / 1000, motion: reduced ? 0 : 1 });
+  }
+  if (!reduced && brainView) brainView.cam.yaw = -1.0 + 0.4 * Math.sin(now / 9000);
+  drawBridge(qseg, sts[0], step, S.playing ? dt * S.speed : 0);
+  renderTranscript(T);
+  const tokIdx = seg.kind === "qwen" ? seg.start + Math.min(seg.count - 1, Math.floor((T - seg.t0) * S.tokRate)) : -1;
+  wallStep(tokIdx, seg.kind === "fly", S.playing ? dt * S.speed : 0, now);
+  drawHist(T);
+  renderStream(seg, T);
+  const v0 = viewStart(), frac = (T - v0) / Math.max(1e-6, total - v0);
+  $("headbar").style.transform = `translateX(${(frac * scrubW).toFixed(1)}px)`;
+  if (now - lastAria > 500) { const sc = $("scrub"); sc.setAttribute("aria-valuenow", String(Math.round(frac * 100))); sc.setAttribute("aria-valuetext", describe(T)); lastAria = now; }
+  requestAnimationFrame(frame);
+}
+
+// controls
+function setPlaying(p) { S.playing = p; $("play").textContent = p ? "Pause" : "Play"; if (!p) setFollow(false); }
+$("play").addEventListener("click", () => setPlaying(!S.playing));
+$("restart").addEventListener("click", () => {
+  if (LIVE) { setPlaying(true); setFollow(true); T = Math.max(viewStart(), total - 1.5 * spanEMA - 0.25); }
+  else T = 0;
+  lastTok = -1; prevTf = flyTimeAt(T);
+});
+$("speed").addEventListener("change", (e) => { S.speed = parseFloat(e.target.value); });
+const scrub = $("scrub"); let scrubbing = false;
+function seek(e) {
+  const r = scrub.getBoundingClientRect(), f = (e.clientX - r.left) / r.width, v0 = viewStart();
+  T = Math.max(v0, Math.min(total - 0.01, v0 + f * (total - v0))); lastTok = -1; prevTf = flyTimeAt(T);
+  if (LIVE) setFollow(f > 0.985);
+}
+scrub.addEventListener("pointerdown", (e) => { scrubbing = true; scrub.setPointerCapture(e.pointerId); seek(e); });
+scrub.addEventListener("pointermove", (e) => { if (scrubbing) seek(e); });
+scrub.addEventListener("pointerup", () => { scrubbing = false; });
+scrub.addEventListener("keydown", (e) => {
+  const k = e.key, step = k === "PageUp" || k === "PageDown" ? 10 : 2;
+  const v0 = viewStart();
+  if (k === "ArrowRight" || k === "ArrowUp" || k === "PageUp") T = Math.min(total - 0.01, T + step);
+  else if (k === "ArrowLeft" || k === "ArrowDown" || k === "PageDown") { T = Math.max(v0, T - step); setFollow(false); }
+  else if (k === "Home") { T = v0; setFollow(false); } else if (k === "End") { T = total - 0.01; setFollow(true); } else if (k === " ") setPlaying(!S.playing); else return;
+  e.preventDefault(); lastTok = -1; prevTf = flyTimeAt(T);
+});
+function camMode(m) {
+  world.cam.mode = m; world.cam.dyaw = 0;
+  world.cam.dist = m === 2 ? 3.2 * ((D && D.world && D.world.arena) || 60) : 11; world.cam.pitch = m === 2 ? 0.78 : 0.42; world.cam.yaw = m === 2 ? -1.57 : -2.2;
+  $("camA").setAttribute("aria-pressed", String(m === 0)); $("camW").setAttribute("aria-pressed", String(m === 2));
+}
+$("camA").addEventListener("click", () => camMode(0)); $("camW").addEventListener("click", () => camMode(2));
+function setCompact(on) {  // remembered per viewer; the page works the same without storage
+  $("app").classList.toggle("compact", on); $("compact").setAttribute("aria-pressed", String(on));
+  try { localStorage.setItem("flyweight.compact", on ? "1" : "0"); } catch {}
+}
+$("compact").addEventListener("click", () => setCompact(!$("app").classList.contains("compact")));
+$("themebtn").setAttribute("aria-pressed", String(LIGHT));
+$("themebtn").addEventListener("click", () => {  // the shaders bake the palette in, so a new theme is a reload
+  try { localStorage.setItem("flyweight.theme", LIGHT ? "dark" : "light"); } catch {}
+  const u = new URL(location.href); u.searchParams.delete("theme"); location.replace(u);
+});
+if (LIGHT) for (const el of document.querySelectorAll(".legend .cls")) {  // the same ink the CNS composite lays down
+  const h = getComputedStyle(el).getPropertyValue("--c").trim().replace("#", ""), c = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const a = Math.max(...c), hue = c.map((x) => x / a), sat = 1 - Math.min(...hue), k = Math.min(1, Math.max(0, (sat - 0.05) / 0.3)), w = k * k * (3 - 2 * k);
+  const ink = hue.map((x, i) => [0.50, 0.53, 0.58][i] * (1 - w) + Math.pow(x, 1.5) * 0.72 * w);
+  el.style.setProperty("--c", `rgb(${ink.map((x) => Math.round(x * 255)).join(" ")})`);
+}
+try { if (localStorage.getItem("flyweight.compact") === "1") setCompact(true); } catch {}
+const ro = new ResizeObserver((es) => { for (const e of es) {
+  if (world && e.target === world.c) world.resize(); else if (brainView && e.target === brainView.c) brainView.resize();
+  else if (wallGL && e.target === wallGL.c) wallGL.resize(); else if (e.target.id === "bridge") flowGeom = null;
+  else if (e.target === scrub) scrubW = e.contentRect.width; else if (e.target === rc) rasterKey = ""; } });
+
+// ---------- live: scripts/run/serve.py streams each window as the model runs it --------------------------------
+const KEEP_WINDOWS = 150;  // windows a viewer keeps for scrubbing back
+let ws = null, liveStarted = null, liveReady = false, lastRun = -1, spanEMA = 0.8, follow = true, liveSt = null, lastMsgAt = 0, wsWait = 1000, nextId = 0, nReads = 0, modelPaused = false;
+const liveQ = [];
+function setFollow(f) { follow = f; if (LIVE) $("restart").setAttribute("aria-pressed", String(f)); }
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function waitFrame(now) {  // before the first window: the arena and the CNS at rest
+  if (world) worldLabels(world.draw([], D.world, null, 0, [], { time: now / 1000, motion: reduced ? 0 : 1, goal: "sugar", sweet: 0 }), [null]);
+  if (brainView) brainView.draw(0, spikeArr, depArr, null, { lv: haloLevels(null, 0), kinds: KINDS, time: now / 1000, motion: reduced ? 0 : 1 });
+  setHTML($("whud"), `<div class="big">Starting</div>The first window arrives in a few seconds`);
+  setHTML($("hud"), "No window has run yet");
+  renderTranscript(0); drawBridge(null, null, 0, 0);
+  if (wallGL) wallGL.draw(heat, -1, false);
+}
+function wsURL() { const u = new URL(LIVE, location.href); u.protocol = u.protocol === "https:" ? "wss:" : "ws:"; return u.href; }
+function startLive() {
+  return new Promise((resolve, reject) => {
+    const sock = new WebSocket(wsURL());
+    sock.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === "hello") {
+        if (liveStarted !== null && m.live.started !== liveStarted) { location.reload(); return; }  // a restarted server: start over
+        ws = sock; wsWait = 1000; lastMsgAt = performance.now();
+        if (liveStarted === null) { liveStarted = m.live.started; initLive(m).then(resolve, reject); }
+      } else if (m.type === "window") { liveQ.push(m); if (liveReady) drainLive(); }
+    };
+    sock.onclose = () => {
+      if (ws === sock) ws = null;
+      if (liveStarted === null) { reject(new Error("Unable to reach the live server")); return; }
+      liveStatus(); setTimeout(() => startLive().catch(() => {}), wsWait); wsWait = Math.min(10000, wsWait * 2);
+    };
+  });
+}
+async function initLive(m) {
+  const { type, votes_b64, ...hdr } = m;
+  D = { ...hdr, segments: [], windows: [], tokens: [], labels: hdr.labels || {} };
+  if (votes_b64) VOTES = readVotes(await gunzip(b64bytes(votes_b64)));
+  const L = (D.qwen && D.qwen.layers) || 32;
+  Q = { nt: 0, L, K: (D.qwen && D.qwen.topk) || 48, toks: [], scale: new Float32Array(L), energy: [] };
+  BC = D.body_cols || 12; LEG_HZ = D.leg_hz || 12; bodies = D.flies.map(() => new Float32Array(0)); wins = []; S.gap = 0.02;
+}
+function appendLive(m) {
+  const fs = m.segments.find((x) => x.kind === "fly"), st = m.state || {};
+  if (!fs || fs.run <= lastRun) return;  // a reconnect resends the history
+  lastRun = fs.run; lastMsgAt = performance.now();
+  Object.assign(D.labels, m.labels || {});
+  D.windows[fs.run] = m.window; wins[fs.run] = parseWindow(b64bytes(m.blob).buffer);
+  if (m.qwen) {  // Qwen's MLP neurons at the report's last token
+    const q = parseQwen(b64bytes(m.qwen).buffer), qs = m.segments.find((x) => x.kind === "qwen");
+    for (let l = 0; l < q.L; l++) Q.scale[l] = Math.max(Q.scale[l], q.scale[l]);
+    q.toks.forEach((layers, j) => {
+      const t = qs.start + j; Q.toks[t] = layers; D.tokens[t] = m.tokens[j]; Q.nt = Math.max(Q.nt, t + 1);
+      for (let l = 0; l < q.L; l++) { let e = 0; for (let k = 0; k < q.K; k++) e += layers[l].val[k]; Q.energy[t * Q.L + l] = e / q.K / (Q.scale[l] || 1); }
+    });
+  }
+  if (m.body) { const rows = new Float32Array(b64bytes(m.body).buffer), B = bodies[0], nb = new Float32Array(B.length + rows.length); nb.set(B); nb.set(rows, B.length); bodies[0] = nb; }
+  for (const x of m.segments) {  // each segment lasts as long as the model took for it, so playback keeps pace with the GPU
+    const e = { ...x, id: nextId++, t0: total };
+    const dur = x.kind === "user" ? 0.25 : x.kind === "qwen" ? Math.max(0.12, st.qwen_s || 0.3) : Math.max(0.1, st.fly_s || 0.5);
+    if (x.kind === "fly") { e.flyDur = dur; e.driver = st.driver; e.levels = m.window.levels; }
+    if (x.kind === "qwen") nReads++;
+    e.t1 = total + dur; total = e.t1 + S.gap; timeline.push(e); trackNode(e);
+  }
+  spanEMA += 0.25 * ((st.qwen_s || 0) + (st.fly_s || 0.5) + S.gap * m.segments.length - spanEMA);
+  liveSt = st; updateLiveUI(st, m.window.levels);
+}
+function pruneLive() {
+  let nfly = timeline.filter((x) => x.kind === "fly").length, cut = 0;
+  while (nfly > KEEP_WINDOWS && cut < timeline.length) {
+    const x = timeline[cut++];
+    if (x.kind === "fly") { nfly--; delete wins[x.run]; delete D.windows[x.run]; }
+    else if (x.kind === "qwen") for (let t = x.start; t < x.start + x.count; t++) delete Q.toks[t];
+  }
+  if (!cut) return;
+  timeline.splice(0, cut);
+  const track = $("track"); for (let i = 0; i < cut && track.firstChild; i++) track.firstChild.remove();
+  const f0 = timeline.find((x) => x.kind === "fly"), B = bodies[0];
+  if (f0 && B.length) { const i = Math.round(D.windows[f0.run].t0 / 10 - B[0]) - 1; if (i > 0) bodies[0] = B.slice(i * BC); }
+}
+function drainLive() {
+  if (!liveQ.length) return;
+  while (liveQ.length) appendLive(liveQ.shift());
+  pruneLive();
+  qIdx = timeline.map((x, i) => x.kind === "qwen" ? i : -1).filter((i) => i >= 0);
+  fIdx = timeline.map((x, i) => x.kind === "fly" ? i : -1).filter((i) => i >= 0);
+  buildHist(); liveFacts(); liveStatus();
+}
+function liveFacts() {
+  const st = liveSt || {}, wall = (st.qwen_s || 0) + (st.fly_s || 0), ms = (D.live && D.live.report_ms) || 20;
+  setHTML($("facts"), [["neurons", (D.n_neurons || 166700).toLocaleString()], ["reports", nReads.toLocaleString()],
+    ["fly time", `${Math.round(st.t_ms || 0).toLocaleString()} ms`], ["speed", wall ? `1/${Math.max(1, Math.round(wall * 1000 / ms))} of real time` : "–"]]
+    .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join(""));
+}
+function liveStatus() {
+  const st = liveSt || {}, stale = performance.now() - lastMsgAt > Math.max(6000, 5000 * spanEMA);
+  let t;
+  if (!ws) t = "Reconnecting…";
+  else if (modelPaused) t = "The model is paused";
+  else if (!liveSt) t = "Starting the model…";
+  else if (stale) t = "No new window for a while. The model may be paused or busy.";
+  else t = `Live · ${(D.live && D.live.report_ms) || 20} ms of fly time per ${((st.qwen_s || 0) + (st.fly_s || 0)).toFixed(2)} s`;
+  setText($("livemeta"), t); $("livedot").classList.toggle("off", !ws || modelPaused || stale || !liveSt);
+}
+const SENSE_NAMES = { sugar: "sugar", bitter: "bitter", "JO-CE": "antennae" };
+let pend = {}, pendT = null;
+function sendLevels(type, key, v) {  // at most every 80 ms while a slider moves
+  (pend[type] = pend[type] || {})[key] = v;
+  if (!pendT) pendT = setTimeout(() => { for (const k in pend) send({ type: k, levels: pend[k] }); pend = {}; pendT = null; }, 80);
+}
+function sliderH(id, name) { return `<div class="sl"><label for="${id}">${esc(name)}</label><input type="range" id="${id}" min="0" max="15" step="1" value="0" style="--p: 0%"><output id="${id}o" for="${id}">0</output></div>`; }
+const fillOf = (el) => el.style.setProperty("--p", `${(+el.value / 15 * 100).toFixed(1)}%`);  // the track fills up to the thumb
+let msgPend = null;  // the message we just sent or cleared, shown until the server's state agrees
+function showStanding(text, driver) {
+  const box = $("standing"), on = !!text;
+  if (box.hidden === on) box.hidden = !on;
+  if (!on) return;
+  const q = $("standingtext"); setText(q, text); if (q.title !== text) q.title = text;
+  setText($("standinglbl"), driver === "you" ? "Held while you drive" : "Qwen is reading");
+}
+function buildLiveUI() {
+  const L = D.live, cmds = L.commands, flyOnly = L.fly_only;
+  $("app").classList.add("is-live"); $("livepanel").hidden = false; $("restart").textContent = "Live"; setFollow(true);
+  $("cmdsl").innerHTML = cmds.map((c, i) => sliderH(`c${i}`, L.words[i])).join("");
+  $("sensesl").innerHTML = L.senses.map((g, i) => sliderH(`s${i}`, SENSE_NAMES[g] || g)).join("");
+  const val = (id) => +$(id).value;
+  cmds.forEach((c, i) => $(`c${i}`).addEventListener("input", (e) => {
+    e.target.dataset.t = Date.now(); setText($(`c${i}o`), e.target.value); fillOf(e.target);
+    if (!liveSt || liveSt.driver !== "you") {  // taking the controls from Qwen: start from the levels it set
+      send({ type: "driver", value: "you" }); send({ type: "levels", levels: Object.fromEntries(cmds.map((k, j) => [k, val(`c${j}`)])) });
+      if (liveSt) liveSt.driver = "you"; updateDriver("you");
+    } else sendLevels("levels", c, val(`c${i}`));
+  }));
+  L.senses.forEach((g, i) => $(`s${i}`).addEventListener("input", (e) => { e.target.dataset.t = Date.now(); setText($(`s${i}o`), e.target.value); fillOf(e.target); sendLevels("senses", g, val(`s${i}`)); }));
+  $("drvQ").addEventListener("click", () => { send({ type: "driver", value: "qwen" }); updateDriver("qwen"); });
+  $("drvU").addEventListener("click", () => { send({ type: "driver", value: "you" }); send({ type: "levels", levels: Object.fromEntries(cmds.map((k, j) => [k, val(`c${j}`)])) }); updateDriver("you"); });
+  $("dust").addEventListener("click", () => send({ type: "world", action: "dust" }));
+  $("resetfly").addEventListener("click", () => send({ type: "world", action: "reset" }));
+  $("pausemodel").addEventListener("click", () => { modelPaused = !modelPaused; send({ type: "pause", value: modelPaused });
+    $("pausemodel").setAttribute("aria-pressed", String(modelPaused)); $("pausemodel").textContent = modelPaused ? "Resume the model" : "Pause the model"; liveStatus(); });
+  if (flyOnly) { $("drvQ").disabled = true; updateDriver("you"); }
+  else {
+    $("chat").hidden = false; $("chatcap").hidden = false;
+    $("chat").addEventListener("submit", (e) => {  // the message stands in every report until it is replaced or cleared
+      e.preventDefault(); const t = $("chatin").value.trim(); if (!t) return;
+      send({ type: "message", text: t }); $("chatin").value = "";
+      msgPend = { text: t, at: performance.now() }; showStanding(t, liveSt && liveSt.driver);
+    });
+    $("clearmsg").addEventListener("click", () => {
+      send({ type: "message", text: "" }); msgPend = { text: "", at: performance.now() }; showStanding(null);
+      $("chatin").focus();
+    });
+  }
+  setInterval(liveStatus, 1000);
+}
+function updateDriver(d) {
+  const you = d === "you";
+  $("drvQ").setAttribute("aria-checked", String(!you)); $("drvU").setAttribute("aria-checked", String(you));
+  $("cmdsl").classList.toggle("qwen", !you);
+  setText($("drvcap"), D.live.fly_only ? "Qwen isn't loaded here. Your sliders set the command neurons."
+    : you ? "Your sliders set the command neurons. Qwen stops reading reports." : "Qwen's answer sets the command neurons. Move a slider to take over.");
+}
+function setSlider(id, v) {
+  const el = $(id); if (!el || v == null || Date.now() - (+el.dataset.t || 0) < 2500) return;  // not while someone moves it
+  const r = Math.max(0, Math.min(15, Math.round(+v))); if (+el.value !== r) { el.value = r; fillOf(el); } setText($(id + "o"), String(r));
+}
+function updateLiveUI(st, levels) {
+  if (!liveReady) return;
+  updateDriver(st.driver);
+  const L = D.live;
+  L.commands.forEach((c, i) => setSlider(`c${i}`, st.driver === "you" ? (st.levels || {})[c] : (levels || [])[i]));
+  L.senses.forEach((g, i) => setSlider(`s${i}`, (st.senses || {})[g]));
+  if (!L.fly_only) {  // the standing message: the server's, unless we just changed it and the server hasn't caught up
+    let m = st.message || null;
+    if (msgPend) {
+      if ((m || "") === msgPend.text || performance.now() - msgPend.at > Math.max(10000, 4000 * spanEMA)) msgPend = null;
+      else m = msgPend.text || null;
+    }
+    showStanding(m, st.driver);
+  }
+}
+
+async function loadSession() {  // a recorded session (scripts/run/export_viz.py)
+  const [sess, qb, bb] = await Promise.all([fetch("agent/session.json").then((r) => r.json()), gz("agent/qwen.gz.b64.txt"), gz("agent/bodies.gz.b64.txt")]);
+  D = sess;
+  if (D.votes) VOTES = readVotes(await gz("agent/votes.gz.b64.txt"));
+  if (D.mismatch != null) setText($("checkline"), D.mismatch === 0 ? "Identical to a float64 executor on every step of this session." : `Differs from a float64 executor on ${D.mismatch.toLocaleString()} steps (float32 rounding near threshold).`);
+  BC = D.body_cols || 12; LEG_HZ = D.leg_hz || 12; Q = parseQwen(qb); bodies = parseBodies(bb);
+  if (D.packs) {  // windows packed D.pack to a file: [count][len, payload]...
+    const packs = await Promise.all(Array.from({ length: D.packs }, (_, c) => gz(`agent/windows${c}.gz.b64.txt`)));
+    wins = [];
+    for (const buf of packs) {
+      const dv = new DataView(buf); let o = 4;
+      for (let k = 0, n = dv.getUint32(0, true); k < n; k++) { const len = dv.getUint32(o, true); o += 4; wins.push(parseWindow(buf.slice(o, o + len))); o += len; }
+    }
+  } else wins = (await Promise.all(D.windows.map((_, k) => gz(`agent/window${k}.gz.b64.txt`)))).map(parseWindow);
+  const reads = D.segments.filter((x) => x.kind === "qwen").length;
+  setHTML($("facts"), [["neurons", (D.n_neurons || 166700).toLocaleString()], ["reports", reads.toLocaleString()],
+    ["tokens", (D.stream_len || 0).toLocaleString()], ["block check", D.block_mismatch === 0 && !D.say_bad ? "clean" : `${D.block_mismatch || 0} set · ${D.say_bad || 0} SAY`]]
+    .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join(""));
+}
+
+async function main() {
+  if (reduced) { $("rmnote").hidden = false; setPlaying(false); }
+  const [skel, nb, fb] = await Promise.all([fetch("cns/fly_skeleton.json").then((r) => r.json()), gz("cns/neurons.gz.b64.txt"), gz("cns/fly.gz.b64.txt")]);
+  if (LIVE) await startLive();
+  else if (new URLSearchParams(location.search).has("replay")) await loadSession();  // a recorded session (scripts/run/export_viz.py), on request only
+  else throw Object.assign(new Error("no live server"), { start: true });
+  setText($("worldmeta"), `${2 * (D.world.arena || 60)} × ${2 * (D.world.arena || 60)} mm`); neu = parseNeurons(nb);
+  neu.grp = new Uint8Array(neu.n);  // the groups the session follows, 1-based, for the halos and the bridge
+  (D.groups || []).forEach((g, k) => { for (const i of g.idx) if (!neu.grp[i]) neu.grp[i] = k + 1; });
+  { const ks = (D.groups || []).map((g) => g.kind), last = (kind, from) => { let id = from; ks.forEach((x, k) => { if (x === kind) id = k + 1; }); return id; };
+    KINDS = [last("command", 0), 0, 0]; KINDS[1] = last("sense", KINDS[0]); KINDS[2] = last("motor", KINDS[1]); }
+  spikeArr = new Float32Array(neu.n).fill(-1e9); depArr = new Float32Array(neu.n);
+  const lo = [1, 1, 1], hi = [-1, -1, -1];
+  for (let i = 0; i < neu.n; i++) for (let a = 0; a < 3; a++) { const v = neu.pos[i * 3 + a] / 32767; if (v < lo[a]) lo[a] = v; if (v > hi[a]) hi[a] = v; }
+  const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
+  CNS_CENTER = mul(scale3(1 / span, 1 / span, 1 / span), trans(-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -(lo[2] + hi[2]) / 2));
+  try {
+    world = new WorldView($("world"), parseFlyMesh(fb), skel);
+    brainView = new View($("brain"), neu, { base: 0.4, size: 1.05, brainModel: CNS_CENTER, cam: { yaw: -1.0, dyaw: 0, pitch: 0.22, dist: 2.85, min: 1.2, max: 8 } });
+    brainView.version = -1;
+    wallGL = new WallView($("wall"));
+    const cen = (name) => { const g = (D.groups || []).find((x) => x.name === name); if (!g || !g.idx.length) return null;
+      const c = [0, 0, 0]; for (const i of g.idx) for (let a = 0; a < 3; a++) c[a] += neu.pos[i * 3 + a] / 32767 / g.idx.length; return c; };
+    brainView.arcSpec = CMD.map(([, dn, , pool], r) => ({ from: cen(dn), to: cen(pool), colB: ((D.groups[gIndex(pool)] || {}).kind === "pool" ? GLOW.pool : GLOW.motor).map((x) => x / 255) }))
+      .map((a, r) => (a.from && a.to ? { ...a, row: r } : null)).filter(Boolean);
+    brainView.setArcs(brainView.arcSpec);
+  } catch (err) {
+    console.error(err);
+    for (const v of document.querySelectorAll(".view")) v.insertAdjacentHTML("beforeend", '<div class="err">This view needs WebGL2. Open the page in a current browser to see it.</div>');
+  }
+  if (!LIVE) buildTimeline();
+  buildHist(); buildBridge(); clearCNS();
+  qIdx = timeline.map((x, i) => x.kind === "qwen" ? i : -1).filter((i) => i >= 0);
+  fIdx = timeline.map((x, i) => x.kind === "fly" ? i : -1).filter((i) => i >= 0);
+  if (LIVE) { buildLiveUI(); liveReady = true; drainLive(); liveStatus(); }
+  for (const el of [$("world"), $("brain"), scrub, rc, $("wall"), $("bridge")]) ro.observe(el);
+  requestAnimationFrame((t) => { last = t; frame(t); });
+}
+main().catch((e) => {
+  if (e.start) {  // opened as a file or from a static host: this page shows a live fly, run by scripts/run/serve.py
+    setHTML($("whud"), `<div class="big">Run your own fly</div>This page shows the fly inside Qwen live. On a machine with a CUDA GPU, run<br><code>python scripts/run/serve.py</code><br>and open <code>http://localhost:8770</code>. Without Qwen: <code>--fly-only</code>.`);
+    return;
+  }
+  setHTML($("whud"), `<div class="big">${LIVE ? "Unable to reach the live server" : "Unable to load the session"}</div>${LIVE ? "Check that scripts/run/serve.py is running, then reload the page." : "Reload the page to try again."} (${esc(String(e))})`); console.error(e);
+});
+})();
+</script>

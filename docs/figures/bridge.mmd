@@ -1,0 +1,35 @@
+flowchart LR
+  subgraph words["Qwen's margin for each move word, minus its inhibitors"]
+    w_fwd["forward<br>minus left, right, groom"]
+    w_left["left<br>minus right, groom"]
+    w_right["right<br>minus left, groom"]
+    w_back["back<br>minus groom"]
+    w_jump["jump"]
+    w_fly["fly"]
+    w_groom["groom"]
+  end
+  subgraph neurons["Descending neurons, driven at levels 0-15"]
+    n_p9["P9"]
+    n_dl["DNa02 left"]
+    n_dr["DNa02 right"]
+    n_mdn["MDN"]
+    n_gf["giant fiber"]
+    n_dng["DNg02"]
+    n_adn["aDN"]
+  end
+  subgraph acts["What the body does"]
+    a_walk["walks forward"]
+    a_left["turns left"]
+    a_right["turns right"]
+    a_back["walks backward"]
+    a_jump["jumps"]
+    a_fly["powers the wings"]
+    a_groom["grooms the antennae"]
+  end
+  w_fwd --> n_p9 --> a_walk
+  w_left --> n_dl --> a_left
+  w_right --> n_dr --> a_right
+  w_back --> n_mdn --> a_back
+  w_jump --> n_gf --> a_jump
+  w_fly --> n_dng --> a_fly
+  w_groom --> n_adn --> a_groom

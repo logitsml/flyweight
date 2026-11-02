@@ -1,0 +1,12 @@
+---
+config:
+  xyChart:
+    height: 360
+---
+xychart
+  title "Text benchmarks (H100): base Qwen3.5-4B, with the fly inside, eager attention"
+  x-axis [MMLU, ARC-Challenge, HellaSwag, GSM8K, IFEval]
+  y-axis "accuracy" 0 --> 1
+  bar [0.700, 0.526, 0.544, 0.850, 0.800]
+  bar [0.708, 0.532, 0.538, 0.840, 0.820]
+  bar [0.704, 0.528, 0.544, 0.820, 0.800]

@@ -1,0 +1,30 @@
+[project]
+name = "flyweight"
+version = "1.0.0"
+description = "A fruit fly's whole central nervous system compiled into Qwen3.5-4B's own layers."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.6",
+    "transformers>=5.20",
+    "accelerate",  # loading Qwen with a device map
+    "huggingface_hub",
+    "safetensors",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "aiohttp",
+]
+
+[project.optional-dependencies]
+checks = ["brian2", "scipy", "pytest"]  # the Brian2 reference checks, Shiu's figures, the unit tests
+bench = ["datasets", "lm_eval", "langdetect", "immutabledict", "nltk"]  # scripts/experiments/text_eval.py (IFEval needs the last three)
+viewer = ["mujoco", "pyfqmr"]  # scripts/setup/pack_flybody.py
+fast = ["flash-linear-attention"]  # the fused recurrent delta rule (optional; HF's own is equivalent)
+
+[tool.setuptools]
+packages = ["flyweight"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

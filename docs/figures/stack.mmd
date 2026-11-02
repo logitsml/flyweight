@@ -1,0 +1,12 @@
+flowchart TB
+  stream["One token stream: text tokens and fly tokens (TICK, spike, DRIVE, SAY, MOVE)"] --> qwen
+  qwen["Qwen3.5-4B: 32 decoder layers, weights unchanged, run on text tokens and skipped on fly tokens"] --> fly
+  subgraph fly["The fly: 3 stock Gated DeltaNet layers, weights from the connectome"]
+    direction LR
+    l1["Layer 1: drive registers<br>7 commands from Qwen's answer,<br>3 senses from the world"] --> l2["Layer 2: spike ring<br>a 1.8 ms delayed read through<br>24.9 M connections"] --> l3["Layer 3: membranes<br>and motor readout"]
+  end
+  fly --> head["LM head"]
+  head --> text["text logits:<br>Qwen's words"]
+  head --> spikes["spike logits: membrane<br>minus threshold, so greedy<br>decoding fires the neuron"]
+  head --> move["MOVE rows:<br>motor rates for the body"]
+  head --> say["SAY rows:<br>the printed word"]

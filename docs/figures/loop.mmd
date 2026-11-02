@@ -1,0 +1,7 @@
+flowchart LR
+  world["World<br>arena, drops, perch"] -- "report text" --> qwen["Qwen3.5-4B<br>32 layers"]
+  qwen -- "move-word logits<br>at the report's end" --> fly["The fly's 3 layers<br>166,700 LIF neurons"]
+  fly -- "printed senses<br>(SAY tokens)" --> qwen
+  fly -- "motor neuron rates<br>(MOVE rows)" --> body["Body<br>walks, turns, grooms,<br>jumps, flies"]
+  body --> world
+  world -- "taste and antennae<br>(sense registers)" --> fly
